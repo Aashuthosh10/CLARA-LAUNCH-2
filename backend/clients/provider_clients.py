@@ -22,7 +22,9 @@ from backend.config.settings import (
     HTTP_TIMEOUT_WRITE_S,
     SARVAM_API_KEY,
     SARVAM_LANGUAGE_CODE,
+    SARVAM_TTS_PACE_BY_LANG,
     SARVAM_TTS_PACE,
+    SARVAM_TTS_SPEAKER_BY_LANG,
     SARVAM_TTS_SPEAKER,
 )
 
@@ -116,12 +118,16 @@ async def sarvam_tts_to_base64(text: str, target_language_code: str) -> str | No
 
     client = await get_http_client()
     headers = {"api-subscription-key": SARVAM_API_KEY, "Authorization": f"Bearer {SARVAM_API_KEY}"}
+    speaker = SARVAM_TTS_SPEAKER_BY_LANG.get(target_language_code) or SARVAM_TTS_SPEAKER
+    pace = SARVAM_TTS_PACE_BY_LANG.get(target_language_code)
+    if pace is None:
+        pace = SARVAM_TTS_PACE
     payload = {
         "text": text,
         "model": _SARVAM_TTS_MODEL,
         "target_language_code": target_language_code,
-        "speaker": SARVAM_TTS_SPEAKER,
-        "pace": SARVAM_TTS_PACE,
+        "speaker": speaker,
+        "pace": pace,
     }
 
     endpoint_candidates = (
@@ -153,8 +159,8 @@ async def sarvam_tts_to_base64(text: str, target_language_code: str) -> str | No
                 text=text,
                 model=_SARVAM_TTS_MODEL,
                 target_language_code=target_language_code,
-                speaker=SARVAM_TTS_SPEAKER,
-                pace=SARVAM_TTS_PACE,
+                speaker=speaker,
+                pace=pace,
             )
             audios = getattr(result, "audios", None)
             if not audios:
@@ -178,15 +184,24 @@ async def sarvam_tts_to_base64(text: str, target_language_code: str) -> str | No
         return None
 
 
-async def sarvam_stt_from_wav(wav_bytes: bytes) -> tuple[str | None, dict[str, Any]]:
+async def sarvam_stt_from_wav(
+    wav_bytes: bytes,
+    *,
+    language_code_override: str | None = None,
+    phrase_hints: list[str] | None = None,
+) -> tuple[str | None, dict[str, Any]]:
     if not SARVAM_API_KEY or not wav_bytes:
         return None, {}
 
     client = await get_http_client()
     headers = {"api-subscription-key": SARVAM_API_KEY, "Authorization": f"Bearer {SARVAM_API_KEY}"}
     data: dict[str, str] = {"model": _SARVAM_ASR_MODEL, "mode": "transcribe"}
-    if SARVAM_LANGUAGE_CODE and SARVAM_LANGUAGE_CODE != "unknown":
-        data["language_code"] = SARVAM_LANGUAGE_CODE
+    requested_lang = (language_code_override or SARVAM_LANGUAGE_CODE or "").strip().lower()
+    if requested_lang and requested_lang != "unknown":
+        data["language_code"] = requested_lang
+    if phrase_hints:
+        # Best-effort bias payload; ignored by APIs that don't support it.
+        data["vocabulary"] = ",".join([h.strip() for h in phrase_hints if h and h.strip()][:64])
 
     endpoint_candidates = (
         f"{_SARVAM_BASE}/speech-to-text",
@@ -232,8 +247,8 @@ async def sarvam_stt_from_wav(wav_bytes: bytes) -> tuple[str | None, dict[str, A
                 "model": _SARVAM_ASR_MODEL,
                 "mode": "transcribe",
             }
-            if SARVAM_LANGUAGE_CODE and SARVAM_LANGUAGE_CODE != "unknown":
-                kwargs["language_code"] = SARVAM_LANGUAGE_CODE
+            if requested_lang and requested_lang != "unknown":
+                kwargs["language_code"] = requested_lang
             result = sdk.speech_to_text.transcribe(**kwargs)
             text = None
             if hasattr(result, "text"):

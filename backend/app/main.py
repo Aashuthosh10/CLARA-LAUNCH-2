@@ -22,7 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.clients.provider_clients import (
@@ -58,13 +58,22 @@ from backend.config.settings import (
     RAG_MODEL,
     RAG_TOP_K,
     SARVAM_API_KEY,
+    STT_MAX_QUALITY_RETRIES,
+    STT_MIN_CONFIDENCE,
+    STT_MIN_TRANSCRIPT_CHARS,
+    STT_MIN_TRANSCRIPT_TOKENS,
     TARGET_LANGUAGE_CODES,
 )
 from backend.core.audio_pipeline import get_input_device_info, record_audio, validate_audio_devices
 from backend.core.language_detection import detect_language
 from backend.core.rag import get_relevant_context, get_rag_document_count, warmup_rag
 from backend.services.greetings import get_greeting
-from backend.services.session_language import resolve_session_language, set_session_language, should_run_auto_detect
+from backend.services.session_language import (
+    can_override_language_with_auto_detect,
+    resolve_session_language,
+    set_session_language,
+    should_run_auto_detect,
+)
 from backend.services.answer_generation import (
     INTENT_ADMISSIONS,
     INTENT_COLLEGE_OVERVIEW,
@@ -89,10 +98,11 @@ from backend.services.answer_generation import (
     is_narrator_intent,
     locale_file_id_for_lang_key,
     multilingual_rag_reply_directive,
+    normalize_spoken_query,
     normalize_and_classify_query,
     rag_language_enforcement_directive,
     resolve_intent_from_features,
-    translate_reply_to_session_language_async,
+    build_language_style_directive,
 )
 from backend.utils.cache import TTLRUCache
 from backend.utils.timing import TurnTiming
@@ -122,6 +132,7 @@ ERROR_RECOVERABLE_HINTS: dict[str, str] = {
     "VAD_TIMEOUT": "Speak within 10 seconds of tapping the mic.",
     "STT_EMPTY": "Speak clearly and try again.",
     "STT_FAILED": "Speech recognition failed. Please try again.",
+    "STT_LOW_QUALITY": "Please speak slowly, closer to the mic, in one sentence.",
     "MIC_CAPTURE_FAILED": "Check mic connection and permissions.",
     "RECORD_ERROR": "Recording failed. Check mic and try again.",
     "PROCESS_FAILED": "Something went wrong. Please try again.",
@@ -322,6 +333,69 @@ def _estimate_wav_duration_ms(audio_b64: str) -> float | None:
 def _audio_bytes_len(audio_b64: str | None) -> int:
     if not audio_b64:
         return 0
+    try:
+        return len(base64.b64decode(audio_b64))
+    except Exception:
+        return 0
+
+
+def _bump_metric(session: dict[str, Any], key: str, delta: int = 1) -> None:
+    metrics = session.setdefault("metrics", {})
+    metrics[key] = int(metrics.get(key, 0) or 0) + delta
+
+
+def _stt_phrase_hints() -> list[str]:
+    return [
+        "SVIT",
+        "Sai Vidya",
+        "HOD",
+        "admission",
+        "fees",
+        "placement",
+        "department",
+        "semester",
+        "VTU",
+        "CSE",
+        "ISE",
+        "ECE",
+        "Mechanical",
+        "Civil",
+        "MBA",
+        "AI ML",
+        "Data Science",
+        "Cyber Security",
+    ]
+
+
+def _is_low_quality_transcript(
+    transcript: str | None,
+    stt_meta: dict[str, Any] | None,
+    capture_meta: dict[str, Any] | None,
+) -> tuple[bool, str]:
+    text = (transcript or "").strip()
+    if len(text) < STT_MIN_TRANSCRIPT_CHARS:
+        return True, "too_short_chars"
+    if len(text.split()) < STT_MIN_TRANSCRIPT_TOKENS:
+        return True, "too_short_tokens"
+    confidence = None
+    if isinstance(stt_meta, dict):
+        for k in ("confidence", "language_confidence", "detected_language_confidence"):
+            if stt_meta.get(k) is not None:
+                try:
+                    confidence = float(stt_meta.get(k))
+                    break
+                except (TypeError, ValueError):
+                    confidence = None
+    if confidence is not None and confidence < STT_MIN_CONFIDENCE:
+        return True, f"low_confidence:{confidence:.2f}"
+    if isinstance(capture_meta, dict):
+        rms = capture_meta.get("rms")
+        try:
+            if rms is not None and float(rms) <= 0.0:
+                return True, "silent_capture"
+        except (TypeError, ValueError):
+            pass
+    return False, "ok"
 
 
 def _get_ack_earcon_base64() -> str:
@@ -392,9 +466,11 @@ def _llm_detect_broad_course_intent(text: str, language_name: str) -> bool:
     Returns True only when the query asks for a broad list/menu of courses or departments.
     """
     try:
-        client = get_groq_client()
-        if not client:
+        if not GROQ_API_KEY:
             return False
+        from groq import Groq
+
+        client = Groq(api_key=GROQ_API_KEY)
         system_prompt = (
             "You classify user intent for a college kiosk.\n"
             "Return ONLY one token: BROAD_COURSE_MENU or OTHER.\n"
@@ -430,6 +506,14 @@ def _normalize_tts_pronunciation(text: str) -> str:
     return re.sub(r"\bCLARA\b", "Clara", text or "", flags=re.IGNORECASE)
 
 
+def _prepare_tts_text(text: str) -> str:
+    cleaned = _normalize_tts_pronunciation(text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s*([,.;:!?])\s*", r"\1 ", cleaned)
+    cleaned = re.sub(r"\.{2,}", ".", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 async def tts_to_base64_cached(
     text: str,
     language_code: str,
@@ -437,7 +521,7 @@ async def tts_to_base64_cached(
     turn_id: str | None = None,
     utterance_kind: str = "reply",
 ) -> tuple[str | None, bool]:
-    tts_text = _normalize_tts_pronunciation(text)
+    tts_text = _prepare_tts_text(text)
     key = f"{utterance_kind}|{language_code}|{_normalized_cache_text(tts_text)}"
     logger.info(
         "TTS_REQUEST turn_id=%s kind=%s text_len=%d preview=%r",
@@ -509,6 +593,23 @@ async def maybe_auto_detect_session_language(
         threshold=AUTO_LANGUAGE_DETECT_CONFIDENCE_THRESHOLD,
     )
     is_fallback = detection.method == "threshold_fallback"
+
+    current_lang = session.get("language_code_key")
+    if current_lang and current_lang != detection.lang_key:
+        if not can_override_language_with_auto_detect(
+            session,
+            candidate_key=detection.lang_key,
+            confidence=detection.confidence,
+            threshold=AUTO_LANGUAGE_DETECT_CONFIDENCE_THRESHOLD,
+        ):
+            logger.info(
+                "Auto language detection kept current language=%s candidate=%s confidence=%.2f",
+                current_lang,
+                detection.lang_key,
+                detection.confidence,
+            )
+            return
+        _bump_metric(session, "language_switch_count")
 
     set_session_language(
         session,
@@ -722,10 +823,13 @@ async def process_user_text_and_reply(
     first_sentence_sent = False
 
     try:
+        normalized_input = normalize_spoken_query(text)
+        if normalized_input and normalized_input != text.strip().lower():
+            _bump_metric(session, "normalization_applied_count")
         preprocess: dict[str, Any] | None = None
         try:
             preprocess = await asyncio.wait_for(
-                normalize_and_classify_query(text, lang_name),
+                normalize_and_classify_query(normalized_input or text, lang_name),
                 timeout=MULTILINGUAL_PREPROCESSOR_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -738,9 +842,9 @@ async def process_user_text_and_reply(
             logger.warning("Multilingual preprocessor failed: %s", exc)
             preprocess = None
 
-        english_translation = str((preprocess or {}).get("english_translation") or "").strip()
+        english_translation = normalize_spoken_query((preprocess or {}).get("english_translation"))
         department_hint = (preprocess or {}).get("target_department")
-        query_en = english_translation or text.strip()
+        query_en = english_translation or normalize_spoken_query(text) or text.strip()
         features = extract_features(query_en, department_hint=department_hint)
         intent = resolve_intent_from_features(features)
         detected_department = features.department_name
@@ -893,6 +997,7 @@ async def process_user_text_and_reply(
         # Intent-driven prompt control
         unavailable_reply = get_unavailable_reply(lang_name)
         off_topic_reply = get_off_topic_reply(lang_name)
+        style_directive = build_language_style_directive(lang_name)
         if narrator_payload is not None:
             card_json = json.dumps(narrator_payload, ensure_ascii=False, indent=2)
             system_prompt = build_narrator_system_prompt(lang_name, card_json)
@@ -900,6 +1005,7 @@ async def process_user_text_and_reply(
             system_prompt = (
                 f"You are CLARA, a warm and professional campus receptionist for SVIT. "
                 f"Reply only in {lang_name}. "
+                f"{style_directive} "
                 "You are CLARA, a sweet, helpful, and highly direct AI assistant for SVIT. "
                 "CRITICAL: Your responses MUST be extremely concise, punchy, and conversational. Maximum 2 to 3 short sentences. "
                 "Do NOT output long lists, bullet points, or markdown formatting. "
@@ -1034,19 +1140,6 @@ async def process_user_text_and_reply(
                 logger.exception("Groq streaming failed: %s", exc)
                 reply_text = ""
                 first_sentence = ""
-
-        # Keep model output structure consistent across languages: generate in English, then translate.
-        if reply_text and not direct_reply and lang_name != "English":
-            try:
-                client = await get_groq_client()
-                reply_text = await translate_reply_to_session_language_async(
-                    reply_en=reply_text,
-                    lang_name=lang_name,
-                    client=client,
-                    model=RAG_MODEL,
-                )
-            except Exception:
-                logger.exception("Reply translation failed; using English output")
 
         if not reply_text:
             if is_narrator_intent(intent):
@@ -1263,6 +1356,10 @@ async def process_user_text_and_reply(
             llm_cache_hit=llm_cache_hit,
             tts_cache_hit=tts_cache_hit,
             language=session.get("language_name") or "English",
+            stt_retry_count=int(session.get("metrics", {}).get("stt_retry_count", 0)),
+            stt_low_conf_count=int(session.get("metrics", {}).get("stt_low_conf_count", 0)),
+            language_switch_count=int(session.get("metrics", {}).get("language_switch_count", 0)),
+            normalization_applied_count=int(session.get("metrics", {}).get("normalization_applied_count", 0)),
         )
     except Exception as exc:
         logger.exception("process_user_text_and_reply failed: %s", exc)
@@ -1282,9 +1379,7 @@ async def process_user_text_and_reply(
         log_voice_turn_end(timing.turn_id, timing.summary_ms(), success=False, error_code="PROCESS_FAILED")
 
 
-@asynccontextmanager
-async def lifespan(app: object):
-    """Startup: log RAG document count, validate audio devices, warm clients. Shutdown: close clients."""
+async def _warmup_rag_background() -> None:
     try:
         await asyncio.wait_for(
             asyncio.to_thread(warmup_rag),
@@ -1294,6 +1389,12 @@ async def lifespan(app: object):
         logger.warning("RAG warmup timed out after %.1fs; continuing without warmup", RAG_WARMUP_TIMEOUT_S)
     except Exception as exc:
         logger.warning("RAG warmup exception: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: object):
+    """Startup: log RAG document count, validate audio devices, warm clients. Shutdown: close clients."""
+    rag_warmup_task = asyncio.create_task(_warmup_rag_background())
 
     try:
         n = await asyncio.wait_for(
@@ -1322,8 +1423,12 @@ async def lifespan(app: object):
         logger.warning("AUDIO validation timed out after %.1fs; continuing", AUDIO_DEVICE_VALIDATE_TIMEOUT_S)
 
     asyncio.create_task(warmup_clients())
-    yield
-    await close_clients()
+    try:
+        yield
+    finally:
+        if not rag_warmup_task.done():
+            rag_warmup_task.cancel()
+        await close_clients()
 
 
 app = FastAPI(title="CLARA Backend", lifespan=lifespan)
@@ -1397,11 +1502,13 @@ async def websocket_clara(websocket: WebSocket):
         "language_name": None,
         "language_code_key": None,
         "is_language_auto": None,
+        "language_locked": False,
         "language_detection": None,
         "messages": [],
         "history": [],
         "cached_greeting_audio": None,
         "cached_greeting_message": None,
+        "metrics": {},
     }
 
     try:
@@ -1439,8 +1546,11 @@ async def websocket_clara(websocket: WebSocket):
             if action == "language_selected":
                 language = msg.get("language")
                 if language in VALID_LANGUAGES:
+                    prev_lang = session.get("language_code_key")
                     code_key = LANGUAGE_NAME_TO_CODE_KEY[language]
                     set_session_language(session, code_key, is_auto=False)
+                    if prev_lang and prev_lang != code_key:
+                        _bump_metric(session, "language_switch_count")
                     session["language_detection"] = None
                     try:
                         greeting_text = get_greeting(language)
@@ -1568,8 +1678,27 @@ async def websocket_clara(websocket: WebSocket):
                     continue
 
                 try:
+                    _, _, session_tts_code = resolve_session_language(session)
+                    session_lang_override = None
+                    if session.get("language_locked") and session_tts_code in TARGET_LANGUAGE_CODES.values():
+                        session_lang_override = session_tts_code.split("-")[0].lower()
                     timing.mark("stt_start")
-                    transcript, stt_meta = await sarvam_stt_from_wav(wav_bytes)
+                    transcript, stt_meta = None, {}
+                    quality_reason = "unknown"
+                    for attempt in range(max(0, STT_MAX_QUALITY_RETRIES) + 1):
+                        transcript, stt_meta = await sarvam_stt_from_wav(
+                            wav_bytes,
+                            language_code_override=session_lang_override if attempt == 0 else None,
+                            phrase_hints=_stt_phrase_hints(),
+                        )
+                        low_quality, quality_reason = _is_low_quality_transcript(transcript, stt_meta, capture_meta)
+                        if not low_quality:
+                            break
+                        if attempt < STT_MAX_QUALITY_RETRIES:
+                            _bump_metric(session, "stt_retry_count")
+                            logger.warning("STT low quality (%s), retrying attempt=%d", quality_reason, attempt + 1)
+                        else:
+                            _bump_metric(session, "stt_low_conf_count")
                     timing.mark("stt_end")
                     timing.mark("transcript_ready")
                     stt_ms = timing.duration("stt_start", "stt_end") or 0.0
@@ -1579,6 +1708,20 @@ async def websocket_clara(websocket: WebSocket):
                         len(transcript or ""),
                         (transcript or "")[:80],
                     )
+                    low_quality, quality_reason = _is_low_quality_transcript(transcript, stt_meta, capture_meta)
+                    if low_quality:
+                        logger.warning("STT remained low quality: %s", quality_reason)
+                        payload = _build_error_payload(
+                            "STT_LOW_QUALITY",
+                            ERROR_RECOVERABLE_HINTS["STT_LOW_QUALITY"],
+                            timing.turn_id,
+                            recoverable=True,
+                        )
+                        payload.update(_debug_payload(timing))
+                        await websocket.send_json({"state": 5, "payload": payload})
+                        _log_turn_metrics(timing, error="stt_low_quality")
+                        log_voice_turn_end(timing.turn_id, timing.summary_ms(), success=False, error_code="STT_LOW_QUALITY")
+                        continue
                 except Exception as exc:
                     logger.exception("Sarvam STT failed: %s", exc)
                     timing.mark("turn_end")
@@ -1612,6 +1755,8 @@ async def websocket_clara(websocket: WebSocket):
 
             await websocket.send_json({"state": 5, "payload": msg})
 
+    except WebSocketDisconnect:
+        pass
     except Exception as exc:
         logger.exception("WebSocket error: %s", exc)
         try:

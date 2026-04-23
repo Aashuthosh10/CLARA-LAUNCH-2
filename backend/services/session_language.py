@@ -23,6 +23,7 @@ def set_session_language(
     session["language_code_key"] = code_key
     session["language_name"] = language_name
     session["is_language_auto"] = bool(is_auto)
+    session["language_locked"] = not bool(is_auto)
 
     # Backward-compatible fields used by existing code paths.
     session["language"] = language_name
@@ -46,6 +47,30 @@ def resolve_session_language(session: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def should_run_auto_detect(session: dict[str, Any]) -> bool:
+    if session.get("language_locked"):
+        return False
     if session.get("is_language_auto") is False:
         return False
     return not bool(session.get("language_code_key"))
+
+
+def can_override_language_with_auto_detect(
+    session: dict[str, Any],
+    *,
+    candidate_key: str,
+    confidence: float,
+    threshold: float,
+    collapse_margin: float = 0.20,
+) -> bool:
+    """Allow override only when language was auto-selected and confidence collapsed."""
+    if session.get("language_locked"):
+        return False
+    current = session.get("language_code_key")
+    if not current:
+        return True
+    if current == candidate_key:
+        return False
+    detection = session.get("language_detection") or {}
+    prev_conf = float(detection.get("confidence") or 0.0)
+    # Collapse rule: previous auto-detect was weak and current candidate is clearly stronger.
+    return prev_conf < max(0.0, threshold - collapse_margin) and confidence >= min(1.0, threshold + 0.10)

@@ -7,7 +7,9 @@ from backend.services.answer_generation import (
     INTENT_DEPARTMENT_OVERVIEW,
     INTENT_DOCUMENTS,
     INTENT_HOD_PROFILE,
+    build_language_style_directive,
     extract_features,
+    normalize_spoken_query,
     resolve_intent_from_features,
 )
 
@@ -132,6 +134,16 @@ class TestIntentPipeline(unittest.TestCase):
             with self.subTest(phrase=p):
                 intent, _ = self._resolve(p)
                 self.assertEqual(intent, INTENT_DOCUMENTS)
+
+    def test_normalize_spoken_query_aliases(self) -> None:
+        q = normalize_spoken_query("pls tell me comp sci hod")
+        self.assertIn("cse", q)
+        self.assertNotIn("pls", q)
+
+    def test_language_style_directive_contains_codemix_terms(self) -> None:
+        style = build_language_style_directive("Hindi")
+        self.assertIn("code-mixed", style)
+        self.assertIn("HOD", style)
 
 
 if __name__ == "__main__":

@@ -146,9 +146,10 @@ class TestTtsFullReply(unittest.IsolatedAsyncioTestCase):
             "On Saturdays it is open from 9 AM to 5 PM."
         )
         context_sig = hashlib.sha256(b"").hexdigest()[:12]
+        normalized_query = main.normalize_spoken_query(user_text) or user_text
         cache_key = (
             f"v2-direct|{main.INTENT_NORMAL_QUERY}|en|"
-            f"{main._normalized_cache_text(user_text)}|{context_sig}"
+            f"{main._normalized_cache_text(normalized_query)}|{context_sig}"
         )
         main.LLM_REPLY_CACHE.set(cache_key, full_reply)
         tts_calls: list[dict] = []

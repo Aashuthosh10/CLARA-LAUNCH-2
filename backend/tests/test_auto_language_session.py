@@ -32,6 +32,7 @@ class TestAutoLanguageSession(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(session["language_code_key"], "kn")
             self.assertEqual(session["language_name"], "Kannada")
             self.assertTrue(session["is_language_auto"])
+            self.assertFalse(session["language_locked"])
             self.assertTrue(any(e.get("payload", {}).get("type") == "language_auto_detected" for e in ws.events))
 
             first_event_count = len(ws.events)
@@ -59,6 +60,7 @@ class TestAutoLanguageSession(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session["language_code_key"], "ta")
         self.assertFalse(session["is_language_auto"])
+        self.assertTrue(session["language_locked"])
         self.assertEqual(len(ws.events), 0)
 
 

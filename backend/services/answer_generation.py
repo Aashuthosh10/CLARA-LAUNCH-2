@@ -312,9 +312,11 @@ def build_narrator_system_prompt(language_name: str, target_card_data_json: str)
     Strict narrator instructions: conversational script aligned with on-screen card data.
     target_card_data_json should be pretty-printed JSON the model can read but must not recite verbatim.
     """
+    style_directive = build_language_style_directive(language_name)
     return (
         f"You are CLARA, an AI tour guide for Sai Vidya Institute of Technology (SVIT). "
         f"Reply only in {language_name}.\n\n"
+        f"{style_directive}\n\n"
         "The visitor is looking at an on-screen visual presentation. "
         "The slides are built from the following structured campus data (TARGET_CARD_DATA). "
         "This is the ONLY source of facts you may use for this turn.\n\n"
@@ -351,7 +353,8 @@ def rag_language_enforcement_directive(language_name: str) -> str:
     return (
         f"CRITICAL: You MUST answer the user's query entirely in {language_name}. "
         f"Use the provided context, which is already translated into {language_name}, to form your answer. "
-        "Do not mix languages unless citing a specific technical English term like 'CSE' or 'KCET'."
+        "Do not switch to full English. "
+        f"Only allow common code-mixed campus terms such as {', '.join(COMMON_CODE_MIX_TERMS)}."
     )
 
 
@@ -360,7 +363,8 @@ def multilingual_rag_reply_directive(language_name: str) -> str:
     return (
         f"Answer this query naturally in conversational {language_name}. "
         "The college reference below is in English; use it only for verified facts and respond entirely "
-        f"in {language_name}. Do not mix languages except for standard abbreviations like CSE or KCET."
+        f"in {language_name}. Avoid dictionary-like wording. "
+        f"Allow only common code-mixed terms: {', '.join(COMMON_CODE_MIX_TERMS)}."
     )
 
 
@@ -434,6 +438,133 @@ COURSE_MENU_SPOKEN_PROMPT_BY_LANGUAGE: dict[str, str] = {
 }
 
 SUPPORTED_LANGUAGES = ("English", "Kannada", "Hindi", "Tamil", "Telugu", "Malayalam")
+COMMON_CODE_MIX_TERMS: tuple[str, ...] = (
+    "SVIT",
+    "HOD",
+    "fees",
+    "admission",
+    "placement",
+    "placements",
+    "VTU",
+    "semester",
+    "CSE",
+    "ECE",
+    "MBA",
+)
+LANGUAGE_STYLE_PROFILES: dict[str, dict[str, Any]] = {
+    "English": {
+        "register": "modern spoken English for students and parents",
+        "avoid": "stiff brochure-style lines, long textbook wording, legalistic phrases",
+        "preferred_words": "simple everyday words, direct phrases, warm receptionist tone",
+    },
+    "Hindi": {
+        "register": "modern spoken Hindi (easy, everyday)",
+        "avoid": "overly Sanskritized/literary Hindi and rare formal synonyms",
+        "preferred_words": "campus-friendly common Hindi with natural conversational flow",
+    },
+    "Kannada": {
+        "register": "everyday spoken Kannada used in campus conversation",
+        "avoid": "bookish classical Kannada and hard literary vocabulary",
+        "preferred_words": "short natural spoken forms familiar to students/parents",
+    },
+    "Tamil": {
+        "register": "everyday spoken Tamil",
+        "avoid": "highly literary/formal Tamil and uncommon archaic words",
+        "preferred_words": "simple modern spoken Tamil with practical wording",
+    },
+    "Telugu": {
+        "register": "everyday spoken Telugu",
+        "avoid": "very formal literary Telugu and old-fashioned wording",
+        "preferred_words": "clear, short, student-friendly spoken Telugu",
+    },
+    "Malayalam": {
+        "register": "everyday spoken Malayalam",
+        "avoid": "high literary Malayalam and rare formal expressions",
+        "preferred_words": "natural campus-style Malayalam with short sentences",
+    },
+}
+LANGUAGE_PHRASEBANKS: dict[str, tuple[str, ...]] = {
+    "English": (
+        "Welcome to SVIT. How can I help you today?",
+        "Please say that once more, a little slowly.",
+        "I do not have that exact detail right now.",
+        "Please visit the Admission Block for exact confirmation.",
+        "The fees for this department are shown on your screen.",
+    ),
+    "Hindi": (
+        "SVIT में आपका स्वागत है, मैं कैसे मदद करूं?",
+        "कृपया एक बार फिर से थोड़ा धीरे बोलिए।",
+        "यह सटीक जानकारी अभी मेरे पास नहीं है।",
+        "कृपया सही पुष्टि के लिए एडमिशन ब्लॉक जाएं।",
+        "इस विभाग की फीस स्क्रीन पर दिखाई जा रही है।",
+    ),
+    "Kannada": (
+        "SVIT ಗೆ ಸ್ವಾಗತ, ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?",
+        "ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಸ್ವಲ್ಪ ನಿಧಾನವಾಗಿ ಹೇಳಿ.",
+        "ಆ ನಿಖರ ಮಾಹಿತಿ ಈಗ ನನ್ನ ಬಳಿ ಇಲ್ಲ.",
+        "ದಯವಿಟ್ಟು ಖಚಿತ ಮಾಹಿತಿಗೆ ಅಡ್ಮಿಷನ್ ಬ್ಲಾಕ್‌ಗೆ ಭೇಟಿ ನೀಡಿ.",
+        "ಈ ವಿಭಾಗದ ಶುಲ್ಕ ಮಾಹಿತಿ ಪರದೆಯಲ್ಲಿ ತೋರಿಸುತ್ತಿದ್ದೇನೆ.",
+    ),
+    "Tamil": (
+        "SVIT க்கு வரவேற்கிறேன், எப்படி உதவலாம்?",
+        "தயவு செய்து இன்னொரு முறை கொஞ்சம் மெதுவாக சொல்லுங்கள்.",
+        "அந்த துல்லிய தகவல் இப்போது என்னிடம் இல்லை.",
+        "சரியான உறுதிப்படுத்தலுக்கு அட்மிஷன் அலுவலகத்தை அணுகுங்கள்.",
+        "இந்த துறையின் கட்டண விவரம் திரையில் காட்டப்படுகிறது.",
+    ),
+    "Telugu": (
+        "SVIT కు స్వాగతం, మీకు ఎలా సహాయం చేయగలను?",
+        "దయచేసి మళ్లీ ఒక్కసారి కొంచెం నెమ్మదిగా చెప్పండి.",
+        "ఆ ఖచ్చితమైన సమాచారం ఇప్పుడే నా వద్ద లేదు.",
+        "ఖచ్చితమైన నిర్ధారణకు అడ్మిషన్ బ్లాక్‌ను సంప్రదించండి.",
+        "ఈ విభాగానికి సంబంధించిన ఫీజు వివరాలు స్క్రీన్‌లో ఉన్నాయి.",
+    ),
+    "Malayalam": (
+        "SVIT ലേക്ക് സ്വാഗതം, എങ്ങനെ സഹായിക്കാം?",
+        "ദയവായി വീണ്ടും ഒന്ന് കുറച്ച് മന്ദഗതിയിൽ പറയാമോ?",
+        "ആ കൃത്യമായ വിവരം ഇപ്പോൾ എനിക്ക് ലഭ്യമല്ല.",
+        "കൃത്യമായ സ്ഥിരീകരണത്തിന് അഡ്മിഷൻ ബ്ലോക്കിനെ സമീപിക്കുക.",
+        "ഈ വിഭാഗത്തിന്റെ ഫീസ് വിവരം സ്ക്രീനിൽ കാണിക്കുന്നു.",
+    ),
+}
+
+
+def build_language_style_directive(language_name: str) -> str:
+    profile = LANGUAGE_STYLE_PROFILES.get(language_name, LANGUAGE_STYLE_PROFILES["English"])
+    phrasebank = LANGUAGE_PHRASEBANKS.get(language_name, LANGUAGE_PHRASEBANKS["English"])
+    examples = " | ".join(phrasebank[:5])
+    english_terms = ", ".join(COMMON_CODE_MIX_TERMS)
+    return (
+        f"Style constraints: use {profile['register']}. "
+        f"Avoid: {profile['avoid']}. Prefer: {profile['preferred_words']}. "
+        "Use short, clear spoken sentences, usually 1-2 and at most 3. "
+        f"Understand code-mixed input, but keep the main reply in {language_name}. "
+        f"English terms allowed only when common in campus speech: {english_terms}. "
+        f"Receptionist phrase examples for tone only: {examples}."
+    )
+
+
+def normalize_spoken_query(text: str | None) -> str:
+    """Canonical pre-LLM normalizer for mixed phrasing and entity aliases."""
+    n = normalize_user_input(text)
+    if not n:
+        return ""
+    replacements = {
+        "h o d": "hod",
+        "head of dept": "head of department",
+        "head of dep": "head of department",
+        "computer science": "cse",
+        "comp sci": "cse",
+        "cs ": "cse ",
+        "vtuu": "vtu",
+        "admisson": "admission",
+        "placment": "placement",
+    }
+    out = f" {n} "
+    for src, dst in replacements.items():
+        out = out.replace(src, dst)
+    out = re.sub(r"\b(uh+|um+|mmm+|okay+|ok+|please+|pls+)\b", " ", out, flags=re.IGNORECASE)
+    return _normalize_text(out)
 UNAVAILABLE_REPLY_BY_LANGUAGE: dict[str, str] = {
     "English": "I currently don't have that exact detail. Please contact the admission office for precise information.",
     "Kannada": "ಈ ಕ್ಷಣದಲ್ಲಿ ಆ ನಿಖರ ವಿವರ ನನ್ನ ಬಳಿ ಇಲ್ಲ. ದಯವಿಟ್ಟು ಖಚಿತ ಮಾಹಿತಿಗಾಗಿ ಪ್ರವೇಶ ಕಚೇರಿಯನ್ನು ಸಂಪರ್ಕಿಸಿ.",
@@ -1967,9 +2098,12 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
     NORMAL_QUERY: existing CLARA style with reply in selected language.
     """
     ctx = (context or "").strip()
+    style_directive = build_language_style_directive(language)
     if intent == INTENT_COLLEGE_OVERVIEW:
         prefix = (
             CONCISE_VOICE_RULE
+            + " "
+            + style_directive
             + " "
             + rag_language_enforcement_directive(language)
             + " "
@@ -1982,6 +2116,8 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
     if intent == INTENT_DEPARTMENT_OVERVIEW:
         prefix = (
             CONCISE_VOICE_RULE
+            + "\n\n"
+            + style_directive
             + "\n\n"
             + rag_language_enforcement_directive(language)
             + "\n\n"
@@ -1997,6 +2133,8 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
         prefix = (
             CONCISE_VOICE_RULE
             + "\n\n"
+            + style_directive
+            + "\n\n"
             + rag_language_enforcement_directive(language)
             + "\n\n"
             "The user is asking about admissions, fees, eligibility, or entrance exams. "
@@ -2009,6 +2147,8 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
     if intent == INTENT_PLACEMENTS:
         prefix = (
             CONCISE_VOICE_RULE
+            + "\n\n"
+            + style_directive
             + "\n\n"
             + rag_language_enforcement_directive(language)
             + "\n\n"
@@ -2024,6 +2164,7 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
     if ctx:
         return (
             f"{CONCISE_VOICE_RULE} "
+            f"{style_directive} "
             f"{rag_language_enforcement_directive(language)} "
             f"Reply only in {language}. "
             f"For college-related emotional or opinion questions (for example, 'is this a good college?'), reply with a reassuring, polite tone in one or two short sentences. "
@@ -2038,6 +2179,7 @@ def build_system_prompt(intent: str, language: str, context: str | None) -> str:
         )
     return (
         f"{CONCISE_VOICE_RULE} "
+        f"{style_directive} "
         f"{rag_language_enforcement_directive(language)} "
         f"Reply only in {language}. "
         f"For college-related emotional or opinion questions, respond politely in one or two short sentences. "

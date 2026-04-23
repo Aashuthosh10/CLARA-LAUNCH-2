@@ -70,7 +70,8 @@ RAG_MODEL = os.getenv("RAG_MODEL", "llama-3.1-8b-instant")
 COLLEGE_KNOWLEDGE_PATH = os.getenv("COLLEGE_KNOWLEDGE_PATH", str(BASE_DIR / "college_knowledge.txt"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 # Low-latency Groq model for mixed-language query normalization (Hinglish / regional + English).
-MULTILINGUAL_PREPROCESSOR_MODEL = os.getenv("MULTILINGUAL_PREPROCESSOR_MODEL", "llama3-8b-8192")
+# Use a currently supported model id; override via .env when needed.
+MULTILINGUAL_PREPROCESSOR_MODEL = os.getenv("MULTILINGUAL_PREPROCESSOR_MODEL", "llama-3.1-8b-instant")
 MULTILINGUAL_PREPROCESSOR_MAX_TOKENS = int(os.getenv("MULTILINGUAL_PREPROCESSOR_MAX_TOKENS", "320"))
 MULTILINGUAL_PREPROCESSOR_TIMEOUT_S = float(os.getenv("MULTILINGUAL_PREPROCESSOR_TIMEOUT_S", "2.8"))
 
@@ -99,6 +100,10 @@ if AUDIO_RECORD_MODE not in ("fixed", "vad"):
     AUDIO_RECORD_MODE = "fixed"
 AUDIO_FIXED_RECORD_SECONDS = float(os.getenv("AUDIO_FIXED_RECORD_SECONDS", "4.0"))
 AUDIO_SILENT_RMS_THRESHOLD = float(os.getenv("AUDIO_SILENT_RMS_THRESHOLD", "0.001"))
+STT_MIN_CONFIDENCE = float(os.getenv("STT_MIN_CONFIDENCE", "0.60"))
+STT_MIN_TRANSCRIPT_CHARS = int(os.getenv("STT_MIN_TRANSCRIPT_CHARS", "6"))
+STT_MIN_TRANSCRIPT_TOKENS = int(os.getenv("STT_MIN_TRANSCRIPT_TOKENS", "2"))
+STT_MAX_QUALITY_RETRIES = int(os.getenv("STT_MAX_QUALITY_RETRIES", "1"))
 
 # Server Configuration
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -149,6 +154,34 @@ TARGET_LANGUAGE_CODES = {
     "ta": "ta-IN",
     "te": "te-IN",
     "ml": "ml-IN",
+}
+
+# Optional per-language TTS voice/pace overrides (fallback to global defaults when empty).
+SARVAM_TTS_SPEAKER_BY_LANG = {
+    "en-IN": os.getenv("SARVAM_TTS_SPEAKER_EN_IN", "").strip().lower(),
+    "hi-IN": os.getenv("SARVAM_TTS_SPEAKER_HI_IN", "").strip().lower(),
+    "kn-IN": os.getenv("SARVAM_TTS_SPEAKER_KN_IN", "").strip().lower(),
+    "ta-IN": os.getenv("SARVAM_TTS_SPEAKER_TA_IN", "").strip().lower(),
+    "te-IN": os.getenv("SARVAM_TTS_SPEAKER_TE_IN", "").strip().lower(),
+    "ml-IN": os.getenv("SARVAM_TTS_SPEAKER_ML_IN", "").strip().lower(),
+}
+
+def _pace_from_env(name: str) -> float | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.5, min(2.0, float(raw)))
+    except ValueError:
+        return None
+
+SARVAM_TTS_PACE_BY_LANG = {
+    "en-IN": _pace_from_env("SARVAM_TTS_PACE_EN_IN"),
+    "hi-IN": _pace_from_env("SARVAM_TTS_PACE_HI_IN"),
+    "kn-IN": _pace_from_env("SARVAM_TTS_PACE_KN_IN"),
+    "ta-IN": _pace_from_env("SARVAM_TTS_PACE_TA_IN"),
+    "te-IN": _pace_from_env("SARVAM_TTS_PACE_TE_IN"),
+    "ml-IN": _pace_from_env("SARVAM_TTS_PACE_ML_IN"),
 }
 
 # Frontend language display name -> config key (for TARGET_LANGUAGE_CODES)

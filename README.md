@@ -36,6 +36,12 @@ python -m venv .venv
 pip install -r backend/requirements/requirements.txt
 ```
 
+For local test runs, install the dev requirements after the backend dependencies:
+
+```bash
+pip install -r backend/requirements/requirements-dev.txt
+```
+
 4. Install frontend dependencies:
 
 ```bash
