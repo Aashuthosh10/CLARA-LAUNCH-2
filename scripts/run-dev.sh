@@ -2,7 +2,7 @@
 # Start backend in background, then frontend.
 # Backend port comes from .env (PORT=6969). Frontend must use same port in frontend/.env.local (VITE_WS_URL=ws://localhost:6969/ws/clara).
 set -e
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 # Load PORT from .env (default 6969)
 PORT=6969
@@ -29,5 +29,5 @@ echo "Starting backend at http://localhost:$PORT ..."
 BACKEND_PID=$!
 trap "kill $BACKEND_PID 2>/dev/null" EXIT
 sleep 2
-echo "Starting frontend (open the URL Vite prints, e.g. http://localhost:5176) ..."
+echo "Starting frontend at http://localhost:5176 ..."
 cd frontend && exec npm run dev

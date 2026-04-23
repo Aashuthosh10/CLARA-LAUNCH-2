@@ -32,6 +32,7 @@ from backend.clients.provider_clients import (
     sarvam_tts_to_base64,
     warmup_clients,
 )
+from backend.clients.database import is_db_available
 from backend.config.settings import (
     AUDIO_RECORD_MODE,
     AUTO_LANGUAGE_DETECT_CONFIDENCE_THRESHOLD,
@@ -56,6 +57,7 @@ from backend.config.settings import (
     RAG_CONTEXT_TIMEOUT_S,
     RAG_MODEL,
     RAG_TOP_K,
+    SARVAM_API_KEY,
     TARGET_LANGUAGE_CODES,
 )
 from backend.core.audio_pipeline import get_input_device_info, record_audio, validate_audio_devices
@@ -114,6 +116,8 @@ AUDIO_DEVICE_VALIDATE_TIMEOUT_S = 3.0
 
 # Unified error event schema
 ERROR_RECOVERABLE_HINTS: dict[str, str] = {
+    "INVALID_JSON": "Refresh the kiosk UI and try again.",
+    "INVALID_MESSAGE": "Refresh the kiosk UI and try again.",
     "MIC_SILENT": "Check mic selection and speak closer.",
     "VAD_TIMEOUT": "Speak within 10 seconds of tapping the mic.",
     "STT_EMPTY": "Speak clearly and try again.",
@@ -1367,8 +1371,17 @@ def root() -> dict[str, str]:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "healthy"}
+def health() -> dict[str, Any]:
+    db_connected = is_db_available()
+    rag_documents = get_rag_document_count() if db_connected else 0
+    return {
+        "status": "healthy" if db_connected else "degraded",
+        "groq_configured": bool(GROQ_API_KEY),
+        "sarvam_configured": bool(SARVAM_API_KEY),
+        "db_connected": db_connected,
+        "rag_ready": rag_documents > 0,
+        "rag_documents": rag_documents,
+    }
 
 
 VALID_LANGUAGES = frozenset(LANGUAGE_NAME_TO_CODE_KEY.keys())
@@ -1396,7 +1409,27 @@ async def websocket_clara(websocket: WebSocket):
 
         while True:
             data = await websocket.receive_text()
-            msg = json.loads(data) if data else {}
+            try:
+                msg = json.loads(data) if data else {}
+            except json.JSONDecodeError:
+                payload = _build_error_payload(
+                    "INVALID_JSON",
+                    "Invalid WebSocket message.",
+                    str(uuid.uuid4()),
+                    recoverable=True,
+                )
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
+
+            if not isinstance(msg, dict):
+                payload = _build_error_payload(
+                    "INVALID_MESSAGE",
+                    "WebSocket message must be a JSON object.",
+                    str(uuid.uuid4()),
+                    recoverable=True,
+                )
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
             action = msg.get("action") or msg.get("event")
 
             if action == "wake":

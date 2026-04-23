@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('CLARA chat flow', () => {
   test('Sleep -> Language -> Chat (no menu) shows greeting and orb', async ({ page }) => {
-    await page.goto('http://localhost:5173/');
+    await page.goto('/');
 
     // 1. Sleep screen visible, tap to wake
     await expect(page.getByTestId('sleep-screen')).toBeVisible();
@@ -24,7 +24,7 @@ test.describe('CLARA chat flow', () => {
   });
 
   test('URL ?state=5 shows chat screen with greeting and orb', async ({ page }) => {
-    await page.goto('http://localhost:5173/?state=5', { waitUntil: 'networkidle' });
+    await page.goto('/?state=5', { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
 
     await expect(page.getByTestId('chat-screen')).toBeVisible({ timeout: 10000 });
@@ -37,7 +37,7 @@ test.describe('CLARA chat flow', () => {
   });
 
   test('Debug key 3 then 5: language then chat', async ({ page }) => {
-    await page.goto('http://localhost:5173/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'networkidle' });
     await expect(page.getByTestId('sleep-screen')).toBeVisible();
 
     const sendKey = (key: string) =>

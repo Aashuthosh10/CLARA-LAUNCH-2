@@ -1,201 +1,110 @@
-# CLARA – AI Receptionist Kiosk System
+# CLARA-LAUNCH
 
-Full-stack application: **React (Vite)** frontend + **FastAPI** backend with WebSocket for the CLARA AI receptionist kiosk.
+AI receptionist kiosk with a React/Vite frontend, FastAPI WebSocket backend, PostgreSQL/pgvector RAG store, LLM replies, and Sarvam speech services.
 
-**Repository:** [FB-Clara](https://github.com/thequantumbugs-coder/FB-Clara)
+## Canonical Runtime
 
-## Repository structure
+| Service | Default | Source |
+| --- | --- | --- |
+| Backend HTTP | `http://localhost:6969` | `backend/config/settings.py` |
+| Backend WebSocket | `ws://localhost:6969/ws/clara` | `frontend/src/App.tsx`, `frontend/.env.example` |
+| Frontend dev server | `http://localhost:5176` | `frontend/package.json`, `frontend/vite.config.ts` |
+| PostgreSQL | `127.0.0.1:5432` | `docker-compose.yml` |
 
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
-```
+## Project Structure
 
-## Prerequisites
-
-- **Node.js** 20+ (for frontend)
-- **Python** 3.8+ (for backend)
-
-## Clone and setup
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```text
+backend/              FastAPI app, WebSocket transport, RAG, LLM, TTS, audio pipeline
+frontend/             React 19 kiosk UI
+config/               Runtime UI config
+docs/                 Hardware, Postgres, voice, and baseline notes
+scripts/              Local launch and data helper scripts
+scripts/db/           PostgreSQL/pgvector schema
+docker-compose.yml    Local PostgreSQL + pgvector service
+college_knowledge.txt Source knowledge file for ingestion workflows
 ```
 
-Then run with one of the options below. On systems without Node in `PATH`, you can extract a Node binary into `.node/` (see frontend README); `scripts/run-dev.sh` will use `.node/bin` if present.
+## Setup
 
-## Quick start
+1. Copy `.env.example` to `.env`.
+2. Fill in `GROQ_API_KEY`, `SARVAM_API_KEY`, and `POSTGRES_PASSWORD`.
+3. Install backend dependencies:
 
-### Option 1: Run both (backend + frontend)
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -r backend/requirements/requirements.txt
 ```
 
-- Backend: http://localhost:8000  
-- Frontend: http://localhost:5173  
+4. Install frontend dependencies:
 
-### Option 2: Run separately
-
-Start the **backend first**, then the frontend. The frontend connects to the backend WebSocket (default `ws://localhost:8001/ws/clara`; override with `VITE_WS_URL` in `frontend/.env.local`) and retries every 3 seconds if the backend is not running. If the backend reports "address already in use", free the port (e.g. `netstat -ano | findstr :8001` then `taskkill /PID <pid> /F`) or set `PORT=8002` in `.env` and `VITE_WS_URL=ws://localhost:8002/ws/clara` in `frontend/.env.local`.
-
-**Backend**
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```bash
+cd frontend
+npm install
 ```
 
-**Frontend** (in another terminal)
+## Run Locally
 
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+Start the database:
+
+```bash
+docker compose up -d
+docker exec -i clara-postgres psql -U clara_user -d clara_db < scripts/db/init_pgvector.sql
 ```
 
-## Configuration
+Start the backend:
 
-- Copy `.env.example` to `.env` in the project root and set API keys (e.g. `GROQ_API_KEY`, `SARVAM_*`) and **`POSTGRES_PASSWORD`** for RAG. See **docs/POSTGRES_SETUP.md** for PostgreSQL + pgvector (Ubuntu) and env details.
-- **College knowledge (RAG):** Start PostgreSQL (e.g. `docker compose up -d`), run schema once (`scripts/db/init_pgvector.sql`), then run: `python -m backend.tools.ingest_college_knowledge_pg` when `college_knowledge.txt` is ready.
-- Frontend: optional `frontend/.env.local` (e.g. `GEMINI_API_KEY`, `VITE_WS_URL` for a different backend WebSocket URL such as `ws://localhost:8002/ws/clara`).
-
-### Voice / TTS (CLARA speaks in your language)
-
-For full voice (greeting and replies spoken in the selected language), set in `.env`:
-
-- `GROQ_API_KEY` – for LLM replies (e.g. from [Groq Console](https://console.groq.com/keys)).
-- `SARVAM_API_KEY` – for text-to-speech (or `SARVAM_ASR_API_KEY` / `SARVAM_TTS_API_KEY`; get keys at [Sarvam AI](https://dashboard.sarvam.ai/)).
-
-Run the backend with **full** dependencies (not minimal): `pip install -r backend/requirements/requirements.txt`. Supported languages: English, Kannada, Hindi, Tamil, Telugu, Malayalam. The frontend sends the selected language with `language_selected`; user speech is sent as `user_message` with `text` (from the browser’s speech recognition).
-
-## Tech stack
-
-| Layer    | Stack |
-| -------- | ----- |
-| Frontend | React 19, Vite 6, TypeScript, Tailwind CSS, Motion |
-| Backend  | FastAPI, Uvicorn, WebSockets |
-| Protocol | WebSocket at `ws://localhost:8000/ws/clara` (state + payload) |
-
-## Pushing to GitHub (FB-Clara)
-
-This repo is set up to push to **https://github.com/thequantumbugs-coder/FB-Clara**. From the project root:
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```bash
+. .venv/bin/activate
+python -m backend.main
 ```
 
-If Git prompts for credentials, use your GitHub username and a [Personal Access Token](https://github.com/settings/tokens) (scope `repo`). Or use SSH: `git remote set-url fb-clara git@github.com:thequantumbugs-coder/FB-Clara.git` then run the script again.
+Start the frontend in another terminal:
 
-## Development
-
-- Backend: `backend/main.py` (compat entrypoint), `backend/app/main.py` (FastAPI app), `backend/config/settings.py` (env from `.env`).
-- Frontend: `frontend/` (Vite + React); WebSocket URL in `frontend/src/App.tsx` (`ws://localhost:8000/ws/clara`).
-
-## License
-
-See repository defaults.
-
-## Automatic Language Detection
-
-- Keep `SARVAM_LANGUAGE_CODE=unknown` (or unset) to allow STT auto-detection at ASR level.
-- Backend performs one-time text-level language detection on the first meaningful transcript and persists it in session.
-- Supported auto-detect targets: `en`, `hi`, `kn`, `ta`, `te`, `ml`.
-- If confidence is below threshold, CLARA falls back to English.
-- Manual selection from LanguageSelect is always an override for that session.
-
-Environment knobs:
-
-- `AUTO_LANGUAGE_DETECT_ENABLED=true`
-- `AUTO_LANGUAGE_DETECT_CONFIDENCE_THRESHOLD=0.70`
-
-WebSocket notification (backward compatible `state=5` payload):
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```bash
+cd frontend
+npm run dev
 ```
 
-## Voice Latency Runbook
+Open `http://localhost:5176`. The frontend uses `VITE_WS_URL=ws://localhost:6969/ws/clara` by default.
 
-CLARA now emits per-turn structured latency metrics and WS debug timings.
+## Knowledge Ingestion
 
-### What is measured per turn
+After PostgreSQL is running and the schema is applied, ingest the college knowledge store:
 
-- `record_end_ms` or `transcript_ready_ms`
-- `stt_ms`
-- `llm_first_token_ms`
-- `llm_ms`
-- `tts_ms`
-- `play_ms`
-- `ttff_ms` (time to first feedback)
-- `total_ms`
-
-Metrics are emitted in:
-
-- Backend JSON logs (`{"type":"turn_metrics", ...}`)
-- WS payload as `payload.debug.timings_ms` (when `PERF_DEBUG_TIMINGS=true`)
-
-### Performance controls
-
-- `AUDIO_SILENCE_STOP_MS` (default `600`)
-- `AUDIO_MAX_UTTERANCE_MS` (default `7000`)
-- `LLM_MAX_TOKENS` (default `100`)
-- `LLM_TEMPERATURE` (default `0.2`)
-- `LLM_STREAM_PARTIAL_DEBOUNCE_MS` (default `120`)
-
-### Warmups
-
-At startup, CLARA runs best-effort background warmups for Groq and Sarvam (non-blocking).
-
-### How to validate latency (20 turns)
-
-1. Start backend and frontend.
-2. Run 20 short turns (<=6 words each).
-3. Collect backend logs and extract `turn_metrics` JSON lines.
-4. Compute p50/p95 for `ttff_ms` and `total_ms`.
-
-Quick PowerShell extraction example (from backend log file):
-
-```
-├── backend/          # FastAPI API + WebSocket (/ws/clara)
-├── frontend/         # React 19 + Vite + TypeScript UI
-├── config/           # Runtime UI config
-├── scripts/          # Launch and deployment helpers
-├── docs/             # Setup and baseline documentation
-└── .env.example      # Backend env template (copy to .env)
+```bash
+python -m backend.tools.ingest_college_knowledge_pg
 ```
 
+## Verification
 
+Backend health:
 
+```bash
+curl http://localhost:6969/health
+```
 
+Frontend build:
+
+```bash
+cd frontend
+npm run build
+```
+
+Backend tests:
+
+```bash
+python -m pytest backend/tests
+```
+
+WebSocket smoke test:
+
+```bash
+python -m backend.tools.ws_smoketest
+```
+
+## Notes
+
+- Keep `.env` private; do not commit secrets.
+- The WebSocket protocol is `state` plus `payload`; the route remains `/ws/clara`.
+- If `POSTGRES_PASSWORD` is missing or the DB is down, `/health` reports degraded status and RAG falls back gracefully.

@@ -1,5 +1,5 @@
 # Start CLARA backend. Run from project root.
-# Frees the backend port if in use, then starts backend so the frontend can connect.
+# Starts backend so the frontend can connect.
 
 $ErrorActionPreference = "Stop"
 # Script lives in scripts/; project root is one level up.
@@ -18,12 +18,7 @@ Write-Host "Checking if port $port is in use..."
 
 $listeners = netstat -ano | Select-String ":\s*$port\s+.*LISTENING"
 if ($listeners) {
-    $pids = $listeners | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
-    foreach ($procId in $pids) {
-        Write-Host "Stopping process $procId holding port $port..."
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
-    }
+    Write-Error "Port $port is already in use. Stop that process or set PORT to a free port in .env."
 }
 
 $venvPython = Join-Path $ProjectRoot "backend\.venv\Scripts\python.exe"
