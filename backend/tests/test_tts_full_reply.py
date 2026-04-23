@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import io
 import unittest
 import wave
@@ -145,13 +144,6 @@ class TestTtsFullReply(unittest.IsolatedAsyncioTestCase):
             "Our library is open from 8 AM to 8 PM on weekdays. "
             "On Saturdays it is open from 9 AM to 5 PM."
         )
-        context_sig = hashlib.sha256(b"").hexdigest()[:12]
-        normalized_query = main.normalize_spoken_query(user_text) or user_text
-        cache_key = (
-            f"v2-direct|{main.INTENT_NORMAL_QUERY}|en|"
-            f"{main._normalized_cache_text(normalized_query)}|{context_sig}"
-        )
-        main.LLM_REPLY_CACHE.set(cache_key, full_reply)
         tts_calls: list[dict] = []
 
         async def _fake_tts(text: str, language_code: str, **kwargs):
@@ -167,9 +159,15 @@ class TestTtsFullReply(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             main, "maybe_auto_detect_session_language", new=AsyncMock(return_value=None)
         ), patch.object(
+            main,
+            "normalize_and_classify_query",
+            new=AsyncMock(return_value={"english_translation": user_text, "target_department": None}),
+        ), patch.object(
             main, "get_relevant_context", new=_empty_rag_context
         ), patch.object(
             main, "_load_svit_json_context", new=lambda _k: ""
+        ), patch.object(
+            main.LLM_REPLY_CACHE, "get", return_value=full_reply
         ), patch.object(
             main, "_stream_groq_reply", new=AsyncMock(return_value=("", ""))
         ), patch.object(
