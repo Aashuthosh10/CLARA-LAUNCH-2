@@ -13,17 +13,19 @@ import re
 import struct
 import sys
 import uuid
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any 
 
 # Ensure project root is on path when run as a script.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from backend.clients.provider_clients import (
     close_clients,
@@ -32,7 +34,14 @@ from backend.clients.provider_clients import (
     sarvam_tts_to_base64,
     warmup_clients,
 )
-from backend.clients.database import is_db_available
+from backend.clients.database import (
+    end_session,
+    init_audit_tables,
+    insert_error,
+    insert_turn,
+    is_db_available,
+    start_session,
+)
 from backend.config.settings import (
     AUDIO_RECORD_MODE,
     AUTO_LANGUAGE_DETECT_CONFIDENCE_THRESHOLD,
@@ -54,15 +63,24 @@ from backend.config.settings import (
     PERF_DEBUG_TIMINGS,
     PORT,
     FRONTEND_URL,
+    MAX_WS_MESSAGE_BYTES,
+    PROD_MODE,
+    RAG_CONFIDENCE_THRESHOLD,
+    REQUIRE_WS_AUTH_IN_PROD,
     RAG_CONTEXT_TIMEOUT_S,
     RAG_MODEL,
     RAG_TOP_K,
+    SECURITY_HEADERS_ENABLED,
     SARVAM_API_KEY,
     STT_MAX_QUALITY_RETRIES,
     STT_MIN_CONFIDENCE,
     STT_MIN_TRANSCRIPT_CHARS,
     STT_MIN_TRANSCRIPT_TOKENS,
     TARGET_LANGUAGE_CODES,
+    WS_ALLOWED_ORIGINS,
+    WS_AUTH_TOKEN,
+    WS_RATE_LIMIT_MAX_MESSAGES,
+    WS_RATE_LIMIT_WINDOW_S,
 )
 from backend.core.audio_pipeline import get_input_device_info, record_audio, validate_audio_devices
 from backend.core.language_detection import detect_language
@@ -113,6 +131,7 @@ from backend.utils.voice_logger import (
     log_voice_tts,
     log_voice_turn_end,
 )
+from backend.models.ws_messages import WsInboundMessage
 
 logger = logging.getLogger(__name__)
 _SVIT_LOCALES_DIR = _PROJECT_ROOT / "backend" / "data" / "locales"
@@ -923,6 +942,8 @@ async def process_user_text_and_reply(
         timing.mark("rag_start")
         narrator_payload: dict[str, Any] | None = None
         context_source = "none"
+        retrieval_score = 0.0
+        rag_sources: list[dict[str, Any]] = []
         if off_topic_direct_reply is not None:
             # Strict scope guard: do not answer non-college questions.
             context = ""
@@ -966,6 +987,7 @@ async def process_user_text_and_reply(
                     timing.mark("rag_end")
                 if context.strip():
                     context_source = "rag"
+                    retrieval_score = 0.5
                 else:
                     json_context = _load_svit_json_context(lang_key)
                     if json_context:
@@ -985,6 +1007,7 @@ async def process_user_text_and_reply(
                 timing.mark("rag_end")
             if context.strip():
                 context_source = "rag"
+                retrieval_score = 0.5
                 logger.info("RAG context: ok (%d chars)", len(context))
             else:
                 logger.warning("RAG context: empty")
@@ -992,7 +1015,17 @@ async def process_user_text_and_reply(
                 if json_context:
                     context = json_context
                     context_source = "json_fallback"
+                    retrieval_score = 0.35
                     logger.info("RAG fallback: using JSON master context (%d chars)", len(context))
+        if context_source == "rag":
+            rag_sources = [{"source": "pgvector", "kind": "retrieval", "score": retrieval_score}]
+        elif context_source == "json_fallback":
+            rag_sources = [{"source": "locale_json", "kind": "fallback", "score": retrieval_score}]
+        if context_source == "rag" and retrieval_score < RAG_CONFIDENCE_THRESHOLD:
+            logger.warning("RAG confidence below threshold (%.3f < %.3f); dropping retrieval context", retrieval_score, RAG_CONFIDENCE_THRESHOLD)
+            context = ""
+            context_source = "none"
+            rag_sources = []
 
         # Intent-driven prompt control
         unavailable_reply = get_unavailable_reply(lang_name)
@@ -1333,11 +1366,13 @@ async def process_user_text_and_reply(
             "messages": session["messages"],
             "isProcessing": False,
             "isSpeaking": bool(full_audio_b64),
+            "status": "done",
             "turn_id": timing.turn_id,
             "utterance_kind": utterance_kind,
             "segment_index": segment_index,
             "is_final_segment": is_final_segment,
-            "showCard": show_card
+            "showCard": show_card,
+            "sources": rag_sources,
         }
         if department_id:
             payload["departmentId"] = department_id
@@ -1348,6 +1383,20 @@ async def process_user_text_and_reply(
 
         payload.update(_debug_payload(timing))
         await websocket.send_json({"state": 5, "payload": payload})
+        await asyncio.to_thread(
+            insert_turn,
+            timing.turn_id,
+            session.get("session_id", ""),
+            user_text=text,
+            assistant_text=reply_text,
+            timings_json=timing.summary_ms(),
+            providers_json={"rag_context_source": context_source, "llm_cache_hit": llm_cache_hit, "tts_cache_hit": tts_cache_hit},
+            rag_sources=rag_sources,
+            language=session.get("language_name"),
+            stt_confidence=(stt_meta or {}).get("confidence") if isinstance(stt_meta, dict) else None,
+            retrieval_score=retrieval_score,
+            used_fallback=context_source != "rag",
+        )
 
         log_voice_turn_end(timing.turn_id, timing.summary_ms(), success=True)
 
@@ -1371,10 +1420,21 @@ async def process_user_text_and_reply(
                 timing.turn_id,
                 recoverable=True,
             )
+            err_payload["status"] = "error"
             err_payload.update(_debug_payload(timing))
             await websocket.send_json({"state": 5, "payload": err_payload})
         except Exception:
             pass
+        await asyncio.to_thread(
+            insert_error,
+            session_id=session.get("session_id"),
+            turn_id=timing.turn_id,
+            stage="process_user_text_and_reply",
+            code="PROCESS_FAILED",
+            message=str(exc),
+            stacktrace_hash=hashlib.sha1(str(exc).encode("utf-8")).hexdigest()[:16],
+            details_json={},
+        )
         _log_turn_metrics(timing, error="process_failed")
         log_voice_turn_end(timing.turn_id, timing.summary_ms(), success=False, error_code="PROCESS_FAILED")
 
@@ -1409,6 +1469,11 @@ async def lifespan(app: object):
         logger.warning("RAG doc-count check timed out after %.1fs", RAG_DOC_COUNT_TIMEOUT_S)
     except Exception as exc:
         logger.warning("RAG: could not check database: %s", exc)
+
+    try:
+        await asyncio.to_thread(init_audit_tables)
+    except Exception as exc:
+        logger.warning("Audit tables init skipped: %s", exc)
 
     try:
         audio_ok, audio_msg = await asyncio.wait_for(
@@ -1470,6 +1535,18 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    if SECURITY_HEADERS_ENABLED:
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=()"
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {"status": "ok", "service": "CLARA"}
@@ -1479,6 +1556,12 @@ def root() -> dict[str, str]:
 def health() -> dict[str, Any]:
     db_connected = is_db_available()
     rag_documents = get_rag_document_count() if db_connected else 0
+    dependencies = {
+        "groq": bool(GROQ_API_KEY),
+        "sarvam": bool(SARVAM_API_KEY),
+        "postgres": bool(db_connected),
+        "rag_documents_loaded": bool(rag_documents > 0),
+    }
     return {
         "status": "healthy" if db_connected else "degraded",
         "groq_configured": bool(GROQ_API_KEY),
@@ -1486,6 +1569,7 @@ def health() -> dict[str, Any]:
         "db_connected": db_connected,
         "rag_ready": rag_documents > 0,
         "rag_documents": rag_documents,
+        "dependencies": dependencies,
     }
 
 
@@ -1494,9 +1578,25 @@ VALID_LANGUAGES = frozenset(LANGUAGE_NAME_TO_CODE_KEY.keys())
 
 @app.websocket("/ws/clara")
 async def websocket_clara(websocket: WebSocket):
+    origin = (websocket.headers.get("origin") or "").strip()
+    if origin and origin not in set(WS_ALLOWED_ORIGINS):
+        await websocket.close(code=1008, reason="origin_not_allowed")
+        return
+    if PROD_MODE and REQUIRE_WS_AUTH_IN_PROD and WS_AUTH_TOKEN:
+        token = (
+            websocket.query_params.get("token")
+            or websocket.headers.get("x-clara-token")
+            or websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        )
+        if token != WS_AUTH_TOKEN:
+            await websocket.close(code=1008, reason="unauthorized")
+            return
     await websocket.accept()
     logger.info("WebSocket client connected")
+    session_id = uuid.uuid4().hex
+    await asyncio.to_thread(start_session, session_id, None, None, {"origin": origin or None})
     session: dict[str, Any] = {
+        "session_id": session_id,
         "language": None,
         "language_code": None,
         "language_name": None,
@@ -1509,13 +1609,79 @@ async def websocket_clara(websocket: WebSocket):
         "cached_greeting_audio": None,
         "cached_greeting_message": None,
         "metrics": {},
+        "active_turn_task": None,
+        "last_rag_sources": [],
+        "last_retrieval_score": None,
     }
+    msg_timestamps: list[float] = []
+
+    async def _launch_turn_task(
+        *,
+        text: str,
+        timing: TurnTiming,
+        stt_meta: dict[str, Any] | None,
+        local_intent: dict[str, Any] | None = None,
+    ) -> None:
+        if session.get("active_turn_task") and not session["active_turn_task"].done():
+            session["active_turn_task"].cancel()
+        async def _runner() -> None:
+            try:
+                await process_user_text_and_reply(
+                    session,
+                    text,
+                    websocket,
+                    timing,
+                    stt_meta=stt_meta,
+                    local_intent=local_intent,
+                )
+            except asyncio.CancelledError:
+                try:
+                    await websocket.send_json(
+                        {"state": 5, "payload": {"turn_id": timing.turn_id, "status": "cancelled", "isProcessing": False}}
+                    )
+                except Exception:
+                    pass
+                await asyncio.to_thread(
+                    insert_error,
+                    session_id=session.get("session_id"),
+                    turn_id=timing.turn_id,
+                    stage="turn_task",
+                    code="TURN_CANCELLED",
+                    message="Turn cancelled due to newer action.",
+                    stacktrace_hash=None,
+                    details_json={},
+                )
+                raise
+            except Exception as exc:
+                await asyncio.to_thread(
+                    insert_error,
+                    session_id=session.get("session_id"),
+                    turn_id=timing.turn_id,
+                    stage="turn_task",
+                    code="TURN_TASK_ERROR",
+                    message=str(exc),
+                    stacktrace_hash=hashlib.sha1(str(exc).encode("utf-8")).hexdigest()[:16],
+                    details_json={},
+                )
+                raise
+        session["active_turn_task"] = asyncio.create_task(_runner())
 
     try:
         await websocket.send_json({"state": 0, "payload": None})
 
         while True:
             data = await websocket.receive_text()
+            if len(data.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                payload = _build_error_payload("PAYLOAD_TOO_LARGE", "Message too large.", str(uuid.uuid4()), recoverable=True)
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
+            now = asyncio.get_running_loop().time()
+            msg_timestamps = [t for t in msg_timestamps if now - t <= WS_RATE_LIMIT_WINDOW_S]
+            if len(msg_timestamps) >= WS_RATE_LIMIT_MAX_MESSAGES:
+                payload = _build_error_payload("RATE_LIMITED", "Too many messages. Please slow down.", str(uuid.uuid4()), recoverable=True)
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
+            msg_timestamps.append(now)
             try:
                 msg = json.loads(data) if data else {}
             except json.JSONDecodeError:
@@ -1537,14 +1703,25 @@ async def websocket_clara(websocket: WebSocket):
                 )
                 await websocket.send_json({"state": 5, "payload": payload})
                 continue
-            action = msg.get("action") or msg.get("event")
+            try:
+                parsed_msg = WsInboundMessage.model_validate(msg)
+            except ValidationError as exc:
+                payload = _build_error_payload("INVALID_SCHEMA", "Invalid message schema.", str(uuid.uuid4()), recoverable=True)
+                payload["details"] = {"errors": exc.errors()[:3]}
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
+            action = parsed_msg.resolved_action()
+            if not action:
+                payload = _build_error_payload("UNKNOWN_ACTION", "Missing action.", str(uuid.uuid4()), recoverable=True)
+                await websocket.send_json({"state": 5, "payload": payload})
+                continue
 
             if action == "wake":
                 await websocket.send_json({"state": 3, "payload": None})
                 continue
 
             if action == "language_selected":
-                language = msg.get("language")
+                language = parsed_msg.language
                 if language in VALID_LANGUAGES:
                     prev_lang = session.get("language_code_key")
                     code_key = LANGUAGE_NAME_TO_CODE_KEY[language]
@@ -1607,8 +1784,8 @@ async def websocket_clara(websocket: WebSocket):
                 continue
 
             if action == "user_message":
-                text = (msg.get("text") or "").strip()
-                local_intent = msg.get("localIntent")
+                text = (parsed_msg.text or "").strip()
+                local_intent = parsed_msg.localIntent
                 timing = TurnTiming()
                 timing.mark("transcript_ready")
 
@@ -1619,17 +1796,12 @@ async def websocket_clara(websocket: WebSocket):
                     await websocket.send_json({"state": 5, "payload": payload})
                     _log_turn_metrics(timing, error="missing_text")
                 else:
-                    await process_user_text_and_reply(
-                        session,
-                        text,
-                        websocket,
-                        timing,
-                        stt_meta=None,
-                        local_intent=local_intent,
-                    )
+                    await _launch_turn_task(text=text, timing=timing, stt_meta=None, local_intent=local_intent)
                 continue
 
             if action in ("toggle_mic", "mic_start"):
+                if session.get("active_turn_task") and not session["active_turn_task"].done():
+                    session["active_turn_task"].cancel()
                 timing = TurnTiming()
                 processing_payload = {"isProcessing": True, "turn_id": timing.turn_id}
                 processing_payload.update(_debug_payload(timing))
@@ -1742,29 +1914,44 @@ async def websocket_clara(websocket: WebSocket):
                     log_voice_turn_end(timing.turn_id, timing.summary_ms(), success=False, error_code="STT_EMPTY")
                     continue
 
-                await process_user_text_and_reply(session, transcript.strip(), websocket, timing, stt_meta=stt_meta)
+                await _launch_turn_task(text=transcript.strip(), timing=timing, stt_meta=stt_meta)
                 continue
 
-            if action in ("mic_stop", "mic_cancel"):
-                await websocket.send_json({"state": 5, "payload": {"isProcessing": False}})
+            if action in ("mic_stop", "mic_cancel", "reset_session"):
+                if session.get("active_turn_task") and not session["active_turn_task"].done():
+                    session["active_turn_task"].cancel()
+                await websocket.send_json({"state": 5, "payload": {"isProcessing": False, "status": "cancelled"}})
                 continue
 
             if action == "menu_select":
                 await websocket.send_json({"state": 5, "payload": msg})
                 continue
 
-            await websocket.send_json({"state": 5, "payload": msg})
+            payload = _build_error_payload("UNKNOWN_ACTION", f"Unsupported action: {action}", str(uuid.uuid4()), recoverable=True)
+            await websocket.send_json({"state": 5, "payload": payload})
 
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         logger.exception("WebSocket error: %s", exc)
+        await asyncio.to_thread(
+            insert_error,
+            session_id=session.get("session_id") if "session" in locals() else None,
+            turn_id=None,
+            stage="websocket_loop",
+            code="WS_LOOP_ERROR",
+            message=str(exc),
+            stacktrace_hash=hashlib.sha1(str(exc).encode("utf-8")).hexdigest()[:16],
+            details_json={},
+        )
         try:
             await websocket.send_json({"state": -1, "payload": {"error": str(exc)}})
         except Exception:
             pass
     finally:
         logger.info("WebSocket client disconnected")
+        if "session_id" in locals():
+            await asyncio.to_thread(end_session, session_id)
         try:
             await websocket.close()
         except Exception:

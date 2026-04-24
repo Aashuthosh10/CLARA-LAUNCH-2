@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useScroll, useTransform, useMotionValue, useSp
 import { useLanguage } from '../context/LanguageContext';
 import { AuroraText } from '@/components/ui/aurora-text';
 import { X, ChevronRight } from 'lucide-react';
-import svitLogo from '../assets/logo/svit_logo_clean.png';
+import svitLogo from '../assets/logo/svit_logo_transparent.png';
 
 const CAMPUS_IMAGES = [
   '/assets/campus_hd_1.jpg',
@@ -219,25 +219,36 @@ export default function SleepScreen({ onWake }: { onWake: () => void }) {
       {/* Global Dark Contrast Overlay for Visual Balance */}
       <div className="absolute inset-0 z-10 pointer-events-none bg-black/20" />
 
-      {/* Top Left: Logo Block (Hierarchy Pro Max Fix) */}
+      {/* Top Left: Premium Institutional Branding */}
       <div className="absolute top-12 left-16 z-30">
          <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5, duration: 1 }}
-          className="flex items-center gap-8"
+          className="flex items-center gap-4 lg:gap-5"
         >
           <img
             src={svitLogo}
             alt="Sai Vidya Logo"
-            className="h-[110px] w-[110px] lg:h-[128px] lg:w-[128px] object-contain drop-shadow-[0_4px_24px_rgba(255,255,255,0.1)] drop-shadow-[0_4px_16px_rgba(0,0,0,0.6)]"
+            className="h-[135px] w-[135px] lg:h-[160px] lg:w-[160px] object-contain opacity-95"
           />
-          <div className="flex flex-col justify-center">
-            <h1 className="text-4xl lg:text-5xl font-extrabold tracking-[0.2em] text-white uppercase leading-none drop-shadow-md">
+          
+          {/* Vertical Divider */}
+          <div className="h-[135px] lg:h-[160px] w-[4px] bg-[#E85D04] rounded-sm"></div>
+
+          <div className="flex flex-col justify-center pt-1">
+            <h1 className="text-5xl lg:text-[64px] font-black tracking-[0.12em] text-[#F26522] uppercase leading-none drop-shadow-md" style={{ fontFamily: "Inter, sans-serif" }}>
               SAI VIDYA
             </h1>
-            <p className="text-xs lg:text-sm font-medium tracking-[0.4em] text-white/60 uppercase mt-3 drop-shadow-sm">
+            <p className="text-xs lg:text-[14px] font-bold tracking-[0.45em] text-white/90 uppercase mt-2 drop-shadow-sm pr-1">
               Institute of Technology
+            </p>
+            
+            {/* Horizontal Divider */}
+            <div className="h-[3px] w-full bg-[#555555] mt-3 mb-2 rounded-sm"></div>
+            
+            <p className="text-sm lg:text-[17px] font-medium text-white/60 italic drop-shadow-sm" style={{ fontFamily: "'Playfair Display', serif", letterSpacing: "0.03em" }}>
+              Learn to lead
             </p>
           </div>
         </motion.div>
@@ -345,7 +356,7 @@ export default function SleepScreen({ onWake }: { onWake: () => void }) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pb-32">
                 {NEWS_ITEMS.map((item, idx) => (
-                  <NewsCard key={item.id} item={item} index={idx} isOverlay />
+                  <NewsCard key={item.id} item={item} index={idx} isOverlay={true} />
                 ))}
               </div>
             </div>

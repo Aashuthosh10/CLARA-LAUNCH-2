@@ -1,55 +1,372 @@
 export type NormalizedIntent = {
-  trigger: 'course_menu' | 'department_overview' | 'hod' | 'admissions' | 'placements' | 'department_fees' | 'documents' | null;
-  type?: 'department_click';
+  trigger: 'course_menu' | 'department_overview' | 'hod_info' | 'admissions' | 'placements' | 'fees' | 'college_overview' | 'trustees' | 'documents' | null;
   departmentLabel?: string;
 };
 
-// Multilingual mapping for intent-carrying keywords to English canonical terms.
-// This acts as a normalization layer before intent detection.
-const MULTILINGUAL_TOKEN_MAP: Record<string, string> = {
-  // Kannada
-  'ಕೋರ್ಸ್': 'course', 'ಪಠ್ಯಕ್ರಮ': 'courses', 'ವಿಭಾಗ': 'department', 'ಬಗ್ಗೆ': 'about', 'ಯಾರು': 'who',
-  'ಮಾಹಿತಿ': 'information', 'ಪ್ರವೇಶ': 'admission', 'ಶುಲ್ಕ': 'fee', 'ಉದ್ಯೋಗ': 'placement',
-  // Hindi
-  'कोर्स': 'course', 'पाठ्यक्रम': 'courses', 'विभाग': 'department', 'बारे में': 'about', 'कौन': 'who',
-  'जानकारी': 'information', 'प्रवेश': 'admission', 'फीस': 'fee', 'नौकरी': 'placement',
-  // Tamil
-  'பாடநெறி': 'course', 'துறை': 'department', 'பற்றி': 'about', 'யார்': 'who',
-  'தகவல்': 'information', 'சேர்க்கை': 'admission', 'கட்டணம்': 'fee', 'வேலைவாய்ப்பு': 'placement',
-  // Telugu
-  'కోర్సు': 'course', 'విభాగం': 'department', 'గురించి': 'about', 'ఎవరు': 'who',
-  'ప్రవేశం': 'admission', 'ఫీజు': 'fee', 'ఉద్యోగ': 'placement',
-  // Malayalam
-  'കോഴ്സ്': 'course', 'വിഭാഗം': 'department', 'കുറിച്ച്': 'about', 'ആരാണ്': 'who',
-  'വിവരങ്ങൾ': 'information', 'പ്രവേശനം': 'admission', 'ഫീസ്': 'fee', 'ജോലി': 'placement'
-  ,
-  // Common transliterated Kannada/Hinglish tokens
-  'yaav': 'which',
-  'yaava': 'which',
-  'yav': 'which',
-  'alli': 'in',
-  'ali': 'in',
-  'aithe': 'available',
-  'ide': 'available',
-  'ideya': 'available',
-  'estu': 'how much',
-  'eshtu': 'how much',
-  'du': ''
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 1 — LANGUAGE DETECTION (Unicode range testing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type DetectedLanguage = 'English' | 'Kannada' | 'Hindi' | 'Tamil' | 'Telugu' | 'Malayalam';
 
 /**
- * Normalizes multilingual input by replacing local keywords with English equivalents.
+ * Detects the primary language of the input using Unicode script ranges.
+ * Returns the language with the highest script-character density.
+ */
+function detectLanguage(input: string): DetectedLanguage {
+  const ranges: { lang: DetectedLanguage; regex: RegExp }[] = [
+    { lang: 'Kannada',   regex: /[\u0C80-\u0CFF]/g },
+    { lang: 'Hindi',     regex: /[\u0900-\u097F]/g },
+    { lang: 'Tamil',     regex: /[\u0B80-\u0BFF]/g },
+    { lang: 'Telugu',    regex: /[\u0C00-\u0C7F]/g },
+    { lang: 'Malayalam', regex: /[\u0D00-\u0D7F]/g },
+  ];
+
+  let best: DetectedLanguage = 'English';
+  let bestCount = 0;
+
+  for (const { lang, regex } of ranges) {
+    const matches = input.match(regex);
+    const count = matches ? matches.length : 0;
+    if (count > bestCount) {
+      bestCount = count;
+      best = lang;
+    }
+  }
+
+  return best;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2 & 5 — COMPREHENSIVE MULTILINGUAL KEYWORD MAP
+// Phrase → English canonical. Sorted by descending length at runtime so
+// multi-word phrases like "ಡೇಟಾ ಸೈನ್ಸ್" match before the single-word "ಡೇಟಾ".
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MULTILINGUAL_PHRASE_MAP: Record<string, string> = {
+  // ── Kannada ──────────────────────────────────────────────────────────────
+  // Department names (phrases first)
+  'ಡೇಟಾ ಸೈನ್ಸ್': 'data science',
+  'ಕಂಪ್ಯೂಟರ್ ಸೈನ್ಸ್': 'computer science',
+  'ಮಾಹಿತಿ ವಿಜ್ಞಾನ': 'information science',
+  'ಸೈಬರ್ ಭದ್ರತೆ': 'cyber security',
+  'ಸೈಬರ್ ಸೆಕ್ಯುರಿಟಿ': 'cyber security',
+  'ಕೃತಕ ಬುದ್ಧಿಮತ್ತೆ': 'artificial intelligence',
+  'ಎಐ ಎಂಎಲ್': 'ai ml',
+  'ಎಐಎಂಎಲ್': 'aiml',
+  'ಎಲೆಕ್ಟ್ರಾನಿಕ್ಸ್': 'electronics',
+  'ಮೆಕ್ಯಾನಿಕಲ್': 'mechanical',
+  'ಸಿವಿಲ್': 'civil',
+  'ಎಂಬಿಎ': 'mba',
+  'ಡೇಟಾ': 'data',
+  'ಸಿಎಸ್ಇ': 'cse',
+  'ಐಎಸ್ಇ': 'ise',
+  'ಇಸಿಇ': 'ece',
+  'ಸೈಬರ್': 'cyber',
+  'ಯಾಂತ್ರಿಕ': 'mechanical',
+  // Intent keywords
+  'ವಿಭಾಗದ ಮುಖ್ಯಸ್ಥ': 'head of department',
+  'ಕಾಲೇಜು ಕೋರ್ಸುಗಳು': 'college courses',
+  'ಯಾವ ಕೋರ್ಸ್': 'which course',
+  'ಪ್ಲೇಸ್‌ಮೆಂಟ್': 'placement',
+  'ಅಡ್ಮಿಷನ್': 'admission',
+  'ಶುಲ್ಕಗಳು': 'fees',
+  'ಕೋರ್ಸ್': 'course',
+  'ಪಠ್ಯಕ್ರಮ': 'courses',
+  'ವಿಭಾಗ': 'department',
+  'ಬಗ್ಗೆ': 'about',
+  'ಯಾರು': 'who',
+  'ಮಾಹಿತಿ': 'information',
+  'ಪ್ರವೇಶ': 'admission',
+  'ಶುಲ್ಕ': 'fee',
+  'ಉದ್ಯೋಗ': 'placement',
+  'ಮುಖ್ಯಸ್ಥ': 'head',
+  'ಹೆಚ್ಒಡಿ': 'hod',
+  'ಕೆಲಸ': 'job',
+  'ಕಂಪನಿಗಳು': 'companies',
+  'ಫೀಸ್ ಸ್ಟ್ರಕ್ಚರ್': 'fee structure',
+  'ಫೀಸ್': 'fees',
+  'ಹೇಳಿ': 'tell me',
+  'ಹೇಳು': 'tell',
+  'ಎಷ್ಟು': 'how much',
+  'ವ್ಯಾಪಾರ': 'business',
+  'ಸೇರುವುದು ಹೇಗೆ': 'how to join',
+  'ಪ್ರಿನ್ಸಿಪಾಲ್': 'principal',
+  'ಪ್ರಾಂಶುಪಾಲ': 'principal',
+  'ಟ್ರಸ್ಟಿ': 'trustee',
+  'ಟ್ರಸ್ಟಿಗಳು': 'trustees',
+  'ಕಾಲೇಜು': 'college',
+  'ಸಂಸ್ಥೆ': 'institute',
+  'ಕ್ಯಾಂಪಸ್': 'campus',
+  'ಕಟ್‌ಆಫ್': 'cutoff',
+  'ಕೆಸಿಇಟಿ': 'kcet',
+  'ಎಸ್‌ವಿಐಟಿ': 'svit',
+  'ಏನು': 'what',
+  'ಹೇಗೆ': 'how',
+
+  // ── Hindi ────────────────────────────────────────────────────────────────
+  // Department names (phrases first)
+  'डेटा साइंस': 'data science',
+  'डाटा साइंस': 'data science',
+  'डेटा विज्ञान': 'data science',
+  'कंप्यूटर साइंस': 'computer science',
+  'कम्प्यूटर साइंस': 'computer science',
+  'कम्प्यूटर विज्ञान': 'computer science',
+  'कंप्यूटर विज्ञान': 'computer science',
+  'कंप्यूटर सायंस': 'computer science',
+  'कम्प्यूटर सायंस': 'computer science',
+  'कंप्यूटर इंजीनियरिंग': 'computer science',
+  'इन्फॉर्मेशन साइंस': 'information science',
+  'इन्फोर्मेशन साइंस': 'information science',
+  'साइबर सिक्योरिटी': 'cyber security',
+  'साइबर सुरक्षा': 'cyber security',
+  'आर्टिफिशियल इंटेलिजेंस': 'artificial intelligence',
+  'कृत्रिम बुद्धिमत्ता': 'artificial intelligence',
+  'एआई एमएल': 'ai ml',
+  'एआई और एमएल': 'ai ml',
+  'मैकेनिकल इंजीनियरिंग': 'mechanical engineering',
+  'मैकेनिकल इंजिनियरिंग': 'mechanical engineering',
+  'सिविल इंजीनियरिंग': 'civil engineering',
+  'इलेक्ट्रॉनिक्स': 'electronics',
+  'मैकेनिकल': 'mechanical',
+  'सिविल': 'civil',
+  'एआईएमएल': 'aiml',
+  'एआई': 'ai',
+  'एमबीए': 'mba',
+  'सीएसई': 'cse',
+  'आईएसई': 'ise',
+  'ई सी ई': 'ece',
+  'ईसीई': 'ece',
+  'डेटा': 'data',
+  'डाटा': 'data',
+  'साइबर': 'cyber',
+  'आर्टिफिशियल': 'artificial',
+  // Department variations
+  'कंप्यूटरसाइंस': 'computer science',
+  'कम्प्यूटरसाइंस': 'computer science',
+  'डेटासाइंस': 'data science',
+  'डाटासाइंस': 'data science',
+  'साइबरसिक्योरिटी': 'cyber security',
+  'साइबरसुरक्षा': 'cyber security',
+  'मैकेनिकलइंजीनियरिंग': 'mechanical engineering',
+  'सिविलइंजीनियरिंग': 'civil engineering',
+  'इलेक्ट्रॉनिक्सइंजीनियरिंग': 'electronics engineering',
+  // Intent keywords
+  'विभागाध्यक्ष': 'head of department',
+  'फीस स्ट्रक्चर': 'fee structure',
+  'बारे में': 'about',
+  'विभाग': 'department',
+  'कोर्स': 'course',
+  'पाठ्यक्रम': 'courses',
+  'कोर्सेस': 'courses',
+  'विषय': 'subject',
+  'शिक्षा': 'education',
+  'डिग्री': 'degree',
+  'कौन है': 'who is',
+  'कौन हैं': 'who is',
+  'कौन': 'who',
+  'जानकारी': 'information',
+  'प्रवेश': 'admission',
+  'फीस': 'fees',
+  'शुल्क': 'fee',
+  'नौकरी': 'job',
+  'प्लेसमेंट': 'placement',
+  'एचओडी': 'hod',
+  'प्रमुख': 'head',
+  'अध्यक्ष': 'head',
+  'हेड': 'head',
+  'वेतन': 'salary',
+  'बताओ': 'tell me',
+  'बताये': 'tell me',
+  'बताइए': 'tell me',
+  'बोलो': 'tell',
+  'कितना': 'how much',
+  'दाखिला': 'admission',
+  'नामांकन': 'enrollment',
+  'मैकेनिकल विभाग': 'mechanical department',
+  'सिविल विभाग': 'civil department',
+  'कोर्स पूरा होने के बाद': 'after course completion',
+  'प्रिंसिपल': 'principal',
+  'प्राचार्य': 'principal',
+  'ट्रस्टी': 'trustee',
+  'ट्रस्टियों': 'trustees',
+  'संस्थापक': 'founder',
+  'अध्यापक': 'faculty',
+  'कॉलेज': 'college',
+  'संस्थान': 'institute',
+  'कैंपस': 'campus',
+  'कटऑफ': 'cutoff',
+  'केसीईಟಿ': 'kcet',
+  'कितनी': 'how much',
+  'क्या': 'what',
+  // Specific fixes
+  'डिएस': 'data science',
+  'डीएस': 'data science',
+  'डिजिटल साइंस': 'data science',
+  'डिजिटल': 'digital',
+  'आईटी': 'information science',
+  'आई एस ई': 'ise',
+  'मैಕ್': 'mechanical',
+  'ಮೆಕ್': 'mechanical',
+  'ಎಬಿಎ': 'mba',
+  'ಐಎಎಸ್ಇ': 'ise',
+  'ಯಂತ್ರ ವಿಜ್ಞಾನ': 'mechanical',
+
+  // ── Tamil ────────────────────────────────────────────────────────────────
+  'டேட்டா சயின்ஸ்': 'data science',
+  'கணினி அறிவியல்': 'computer science',
+  'தகவல் அறிவியல்': 'information science',
+  'சைபர் செக்யூரிட்டி': 'cyber security',
+  'சைபர் பாதுகாப்பு': 'cyber security',
+  'மெக்கானிக்கல் இன்ஜினியரிங்': 'mechanical engineering',
+  'மெக்கானிக்கல்': 'mechanical',
+  'சிவில் இன்ஜினியரிங்': 'civil engineering',
+  'சிவில்': 'civil',
+  'எலெக்ட்ரானிக்ஸ்': 'electronics',
+  'இயந்திரவியல்': 'mechanical',
+  'எம்.பி.ஏ': 'mba',
+  'ஐஎஸ்இ': 'ise',
+  'ஈசிஇ': 'ece',
+  'ஹெಚ್ஓடி': 'hod',
+  'துறைத் தலைவர்': 'head of department',
+  'தலைவர்': 'head',
+  'தலைமை': 'head',
+  'பாடநெறி': 'course',
+  'படிப்புகள்': 'courses',
+  'கல்வி': 'education',
+  'துறை': 'department',
+  'பற்றி': 'about',
+  'யார்': 'who',
+  'தகவல்': 'information',
+  'சேர்க்கை': 'admission',
+  'கட்டணங்கள்': 'fees',
+  'கட்டணம்': 'fee',
+  'வேலைவாய்ப்பு': 'placement',
+  'பணி': 'job',
+  'வணிகம்': 'business',
+  'சொல்லுங்க': 'tell me',
+  'சொல்லு': 'tell',
+  'எவ்வளவு': 'how much',
+  'முதல்வர்': 'principal',
+  'அறங்காவலர்': 'trustee',
+  'கல்லூரி': 'college',
+  'வளாகம்': 'campus',
+
+  // ── Telugu ───────────────────────────────────────────────────────────────
+  'డేటా సైన్స్': 'data science',
+  'కంప్యూటర్ సైన్స్': 'computer science',
+  'ఇన్ఫర్మేషన్ సైన్స్': 'information science',
+  'సైబర్ సెక్యూరిటీ': 'cyber security',
+  'సైబర్ భద్రత': 'cyber security',
+  'మెకానికల్ ఇంజనీరింగ్': 'mechanical engineering',
+  'మెకానికల్': 'mechanical',
+  'సివిల్ ఇంజనీరింగ్': 'civil engineering',
+  'సివిల్': 'civil',
+  'ఎలక్ట్రానిక్స్': 'electronics',
+  'యంత్రశాస్త్రం': 'mechanical',
+  'ఎంబీఏ': 'mba',
+  'ఐఎస్ఈ': 'ise',
+  'ఇసిఇ': 'ece',
+  'హెచ్ఓడి': 'hod',
+  'విభాగం': 'department',
+  'గురించి': 'about',
+  'ఎవరు': 'who',
+  'ప్రవేశం': 'admission',
+  'ఫీజులు': 'fees',
+  'ఫీజు': 'fee',
+  'ప్లేస్‌మెంట్': 'placement',
+  'ఉద్యోగ': 'placement',
+  'వ్యాపారం': 'business',
+  'సైబర్': 'cyber',
+  'చెప్పండి': 'tell me',
+  'చెప్పు': 'tell',
+  'ఎంత': 'how much',
+  'వివరాలు': 'details',
+  'అధ్యాపకులు': 'faculty',
+  'ముఖ్యాధికారి': 'head',
+  'ప్రధానాచార్యులు': 'principal',
+  'ప్రిన్సిపాల్': 'principal',
+  'కోర్సు': 'course',
+  'కోర్సులు': 'courses',
+  'చదువు': 'education',
+  'కళాశాల': 'college',
+  'క్యాంపస్': 'campus',
+
+  // ── Malayalam ────────────────────────────────────────────────────────────
+  'ഡാറ്റ സയൻസ്': 'data science',
+  'ഡാറ്റാ സയൻസ്': 'data science',
+  'കമ്പ്യൂട്ടർ സയൻസ്': 'computer science',
+  'ഇൻഫർമേഷൻ സയൻസ്': 'information science',
+  'സൈബർ സെക്യൂരിറ്റി': 'cyber security',
+  'മെക്കാനിക്കൽ എഞ്ചിനീയറിംഗ്': 'mechanical engineering',
+  'മെക്കാനിക്കൽ': 'mechanical',
+  'സിവിൽ എഞ്ചിനീയറിംഗ്': 'civil engineering',
+  'സിവിൽ': 'civil',
+  'ഇലക്ട്രോണിക്സ്': 'electronics',
+  'യന്ത്രവിദ്യ': 'mechanical',
+  'എംബിഎ': 'mba',
+  'എബീഎ': 'mba',
+  'ഐഎസ്ഈ': 'ise',
+  'ഇസിഈ': 'ece',
+  'എച്ച്ഒഡി': 'hod',
+  'വിഭാഗം മേധാവി': 'head of department',
+  'തലവൻ': 'head',
+  'വിഭാഗം': 'department',
+  'കുറിച്ച്': 'about',
+  'ആരാണ്': 'who',
+  'വിവരങ്ങൾ': 'information',
+  'പ്രവേശനം': 'admission',
+  'ഫീസ്': 'fees',
+  'ജോലി': 'job',
+  'പ്ലേസ്‌മെന്റ്': 'placement',
+  'ബിസിനസ്': 'business',
+  'സൈബർ': 'cyber',
+  'കോഴ്സുകൾ': 'courses',
+  'കോഴ്സ്': 'course',
+  'പഠനം': 'course',
+  'പറയൂ': 'tell me',
+  'പറയുക': 'tell',
+  'എത്ര': 'how much',
+  'സുരക്ഷ': 'security',
+  'പ്രിൻസിപ്പൽ': 'principal',
+  'ട്രസ്റ്റി': 'trustee',
+  'കോളേജ്': 'college',
+  'ക്യാമ്പസ്': 'campus',
+};
+
+// Pre-sorted keys: longest first so multi-word phrases are replaced before single words.
+const _SORTED_PHRASE_KEYS: string[] = Object.keys(MULTILINGUAL_PHRASE_MAP).sort(
+  (a, b) => b.length - a.length
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2 — NORMALIZATION PIPELINE
+// Converts ALL input into a standard English intent string.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes multilingual input by replacing localized phrases/words with
+ * their English equivalents. Longer phrases are replaced first to avoid
+ * partial matches (e.g., "ಡೇಟಾ ಸೈನ್ಸ್" before "ಡೇಟಾ").
  */
 function normalizeToEnglish(input: string): string {
   let normalized = input.toLowerCase();
-  for (const [local, english] of Object.entries(MULTILINGUAL_TOKEN_MAP)) {
-    // Global replacement for simple token mapping
-    normalized = normalized.split(local).join(english);
+  for (const key of _SORTED_PHRASE_KEYS) {
+    if (normalized.includes(key)) {
+      normalized = normalized.split(key).join(MULTILINGUAL_PHRASE_MAP[key]);
+    }
   }
+  // Collapse extra whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
   return normalized;
 }
 
-// Map of intents to an array of multilingual keywords that signify them.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3 — INTENT MATCHING (runs on normalized English text ONLY)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Intent keyword lists — ENGLISH ONLY (multilingual tokens already normalized above)
 const INTENT_MAP = {
   documents: [
     'document', 'documents', 'documents required', 'admission documents',
@@ -58,113 +375,73 @@ const INTENT_MAP = {
     'documents enna venum', 'documents enti', 'documents entha', 'documents kurich'
   ],
   course_menu: [
-    // English
     'courses', 'programs', 'degrees', 'what do you offer', 'academic options',
-    // Kannada
-    'ಕೋರ್ಸ್', 'ಪಠ್ಯಕ್ರಮ', 'ಕಾಲೇಜು ಕೋರ್ಸುಗಳು', 'ಯಾವ ಕೋರ್ಸ್',
-    // Hindi
-    'कोर्स', 'पाठ्यक्रम', 'कोर्सेस', 'विषय', 'शिक्षा', 'डिग्री',
-    // Tamil
-    'பாடநெறி', 'படிப்புகள்', 'கல்வி',
-    // Telugu
-    'కోర్సు', 'కోర్సులు', 'చదువు',
-    // Malayalam
-    'കോഴ്സുകൾ', 'കോഴ്സ്', 'പഠനം',
-    // Transliteration phrases
-    'college ali yaav courses ide',
-    'college ali yaav yaav departments aithe',
-    'what departments are there',
-    'which departments are available',
-    'departments in college',
-    'department list'
+    'college courses', 'which course', 'course', 'which departments', 'department list'
   ],
   fees: [
-    // English
-    'fee', 'fees', 'tuition', 'management quota',
-    // Kannada
-    'ಶುಲ್ಕ', 'ಶುಲ್ಕಗಳು',
-    // Hindi
-    'फीस', 'शुल्क',
-    // Tamil
-    'கட்டணம்', 'கட்டணங்கள்',
-    // Telugu
-    'ఫీజు', 'ఫీజులు',
-    // Malayalam
-    'ഫീസ്'
+    'fee', 'fees', 'tuition', 'management quota', 'how much', 'cost', 'price',
+    'fee structure',
   ],
   hod: [
-    // English
-    'hod', 'head', 'department head', 'who is leading',
-    // Kannada
-    'ಮುಖ್ಯಸ್ಥ', 'ಹೆಚ್ಒಡಿ', 'ವಿಭಾಗದ ಮುಖ್ಯಸ್ಥ',
-    // Hindi
-    'विभागाध्यक्ष', 'एचओडी', 'प्रमुख', 'अध्यक्ष', 'कौन है', 'कौन हैं', 'बारे में', 'जानकारी', 'हेड',
-    // Tamil
-    'தலைவர்', 'துறைத் தலைவர்', 'ஹெச்ஓடி', 'தலைமை',
-    // Telugu
-    'అధ్యాపకులు', 'హెచ్ఓడి', 'ప్రధానాచార్యులు', 'ముఖ్యాధికారి',
-    // Malayalam
-    'വിഭാഗം മേധാവി', 'എച്ച്ഒഡി', 'തലവൻ'
+    'hod', 'head of department', 'department head', 'who is leading',
   ],
   admissions: [
-    // English
-    'admission', 'fee', 'how to join', 'joining', 'enrollment', 'how much is the fee',
-    // Kannada
-    'ಪ್ರವೇಶ', 'ಶುಲ್ಕ', 'ಸೇರುವುದು ಹೇಗೆ', 'ಅಡ್ಮಿಷನ್',
-    // Hindi
-    'प्रवेश', 'फीस', 'नामांकन', 'दाखिला', 'जानकारी',
-    // Tamil
-    'சேர்க்கை', 'கட்டணம்', 'தகவல்',
-    // Telugu
-    'ప్రవేశం', 'ఫీజులు', 'వివరాలు',
-    // Malayalam
-    'പ്രവേശനം', 'ഫീസ്', 'വിവരങ്ങൾ'
+    'admission', 'how to join', 'joining', 'enrollment', 'eligibility',
+    'entrance', 'kcet', 'comedk', 'counseling', 'quota', 'scholarship',
   ],
   placements: [
-    // English
     'placement', 'job', 'salary', 'recruitment', 'training', 'companies',
-    // Kannada
-    'ಪ್ಲೇಸ್‌ಮೆಂಟ್', 'ಕೆಲಸ', 'ಉದ್ಯೋಗ', 'ಕಂಪನಿಗಳು',
-    // Hindi
-    'प्लेसमेंट', 'नौकरी', 'वेतन', 'कोर्स पूरा होने के बाद',
-    // Tamil
-    'வேலைவாய்ப்பு', 'பணி',
-    // Telugu
-    'ప్లేస్‌మెంట్', 'ఉద్యోగ',
-    // Malayalam
-    'പ്ലേസ്‌മെന്റ്', 'ജോലി'
-  ]
+    'after course completion', 'internship', 'package',
+  ],
+  principal: [
+    'principal', 'who is principal', 'principal name',
+  ],
+  trustees: [
+    'trustee', 'trustees', 'founder', 'founders', 'chairman', 'president',
+    'board of trustees', 'management board',
+  ],
+  college_overview: [
+    'college overview', 'about college', 'about svit', 'college information',
+    'about the college', 'tell me about the college', 'about this college',
+    'institute overview', 'college details', 'about the institute',
+    'about your college', 'college profile', 'college summary',
+    'overview of the college', 'overview of college',
+  ],
+  cutoff: [
+    'cutoff', 'cut off', 'kcet cutoff', 'comedk cutoff', 'rank',
+    'closing rank', 'opening rank',
+  ],
 };
 
-// Map of departments to their standard internal labels, indexed by multilingual keyword triggers.
+// Department entity map — ENGLISH ONLY
 const DEPT_MAP: Record<string, string[]> = {
-  'CSE (Data Science)': [
-    'data science', 'datascience', 'cse data science', 'cse datascience', 'ಡೇಟಾ ಸೈನ್ಸ್', 'ಡೇಟಾ', 'डेटा साइंस', 'डेटा', 'डाटा साइंस', 'डाटा', 'डेटा विज्ञान', 'डेटासाइंस', 'डाटासाइंस', 'डिएस', 'डीएस', 'डिजिटल साइंस', 'डिजिटल'
+  'Data Science': [
+    'data science', 'datascience', 'cse data science',
   ],
   'CSE': [
-    'computer science', 'cse', 'ಕಂಪ್ಯೂಟರ್ ಸೈನ್ಸ್', 'ಸಿಎಸ್ಇ', 'कंप्यूटर साइंस', 'कम्प्यूटर विज्ञान', 'सीएसई', 'सीएस इ', 'कम्प्यूटर साइंस', 'सीएसई', 'कंप्यूटर इंजीनियरिंग', 'कंप्यूटरसाइंस', 'कम्प्यूटरसाइंस', 'कंप्यूटर सायंस', 'कंप्यूटर विज्ञान', 'कम्प्यूटर सायंस'
+    'computer science', 'cse',
   ],
   'ECE': [
-    'electronics', 'ece', 'ಎಲೆಕ್ಟ್ರಾನಿಕ್ಸ್', 'ಇಸಿಇ', 'इलेक्ट्रॉनिक्स', 'ईसीई', 'ई सी ई', 'इलेक्ट्रॉनिक', 'ईसीई', 'इलेक्ट्रॉनिक्सइंजीनियरिंग', 'எலெக்ட்ரானிக்ஸ்', 'ஈசிஇ', 'ఎలక్ట్రానిక్స్', 'ఇసిఇ', 'ഇലക്ട്രോണിക്സ്', 'ഇസിഇ', 'communication'
+    'electronics', 'ece', 'communication',
   ],
   'ISE': [
-    'information science', 'ise', 'ಮಾಹಿತಿ ವಿಜ್ಞಾನ', 'ಐಎಸ್ಇ', 'इन्फॉर्मेशन साइंस', 'आईएएसई', 'आई एस ई', 'इन्फोर्मेशन साइंस', 'आईटी', 'तगவல் அறிவியல்', 'ஐஎஸ்இ', 'ఇన్ఫర్మేషన్ సైన్స్', 'ఐఎస్ఈ', 'ഇൻഫർമേഷൻ സയൻസ്', 'ഐഎസ്ഇ'
+    'information science', 'ise',
   ],
   'Mechanical': [
-    'mechanical', 'ಮೆಕ್ಯಾನಿಕಲ್', 'ಯಾಂತ್ರಿಕ', 'मैकेनिकल', 'मैकेनिकल इंजीनियरिंग', 'यांत्रिक', 'मैकेनिकल विभाग', 'मैकेनिकलइंजीनियरिंग', 'मैकेनिकल इंजिनियरिंग', 'यंत्र विज्ञान', 'मैक', 'मेक', 'மெக்கானிக்கல்', 'மெக்கானிக்கல் இன்ஜினியரிங்', 'இயந்திரவியல்', 'మెకానికల్', 'మెకానికల్ ఇంజనీరింగ్', 'యంత్రశాస్త్రం', 'മെക്കാനിക്കൽ', 'മെക്കാനിക്കൽ എഞ്ചിനീയറിംഗ്', 'യന്ത്രവിദ്യ', 'mech'
+    'mechanical', 'mechanical engineering', 'mech',
   ],
   'Civil': [
-    'civil', 'ಸಿವಿಲ್', 'सिविल', 'सिविल इंजीनियरिंग', 'सिविल विभाग', 'सिविलइंजीनियरिंग', 'சிவில்', 'சிவில் இன்ஜினியரிங்', 'సివిల్', 'సివిల్ ఇంజనీరింగ్', 'സിവിൽ', 'സിവിൽ എഞ്ചിനീയറിംഗ്'
+    'civil', 'civil engineering',
   ],
-  'CSE (AI & ML)': [
-    'aiml', 'artificial intelligence', 'ai and ml', 'ai ml', 'ಎಐ ಎಂಎಲ್', 'ಕೃತಕ ಬುದ್ಧಿಮತ್ತೆ', 'एआई एमएल', 'आर्टिफिशियल इंटेलिजेंस', 'एआई और एमएल', 'एआईएमएल', 'कृत्रिम बुद्धिमत्ता', 'आर्टिफिशियल', 'एआई'
+  'AIML': [
+    'aiml', 'artificial intelligence', 'ai and ml', 'ai ml', 'ai',
   ],
-  'CSE (Cyber Security)': [
-    'cyber security', 'cyber', 'ಸೈಬರ್ ಭದ್ರತೆ', 'ಸೈಬರ್', 'साइबर सिक्योरिटी', 'साइबर सुरक्षा', 'साइबर', 'साइबरसिक्योरिटी', 'साइबरसुरक्षा', 'சைபர் செக்யூரிட்டி', 'சைபர் பாதுகாப்பு', 'సైబర్ సెక్యూరిటీ', 'సైబర్ భద్రత', 'సైబర్ സുരക്ഷ', 'സൈബർ'
+  'Cyber Security': [
+    'cyber security', 'cyber', 'cybersecurity',
   ],
   'MBA': [
-    'mba', 'business', 'management', 'masters in business', 'ಎಂಬಿಎ', 'ವ್ಯಾಪಾರ', 'एमबीए', 'व्यापार', 'एमबीए विभाग', 'एबीए', 'എബീഎ', 'ബിസിനസ്', 'எம்.பி.ஏ', 'வணிகம்', 'ఎంబీఏ', 'వ్యాపారం'
-  ]
+    'mba', 'business', 'management', 'masters in business',
+  ],
 };
 
 /**
@@ -173,121 +450,108 @@ const DEPT_MAP: Record<string, string[]> = {
  * This prevents "aiml" from also triggering "cse" via substring overlap.
  */
 const PRIORITY_OVERRIDES: Record<string, string[]> = {
-  // If AIML is matched, CSE must NOT also match (AIML is a CSE specialization)
-  'CSE (AI & ML)': ['CSE'],
-  // If Data Science is matched, CSE must NOT also match
-  'CSE (Data Science)': ['CSE'],
-  // If Cyber Security is matched, CSE must NOT also match
-  'CSE (Cyber Security)': ['CSE'],
-  // If ISE is matched, CSE must NOT also match
+  'AIML': ['CSE'],
+  'Data Science': ['CSE'],
+  'Cyber Security': ['CSE'],
   'ISE': ['CSE'],
 };
 
-export type InternalIntent = 'COURSE_LIST' | 'DEPARTMENT_INFO' | 'DEPARTMENT_COMPARE' | 'HOD_INFO' | 'ADMISSIONS_GOTO' | 'PLACEMENTS_GOTO' | 'UNKNOWN';
+export type InternalIntent =
+  | 'COURSE_LIST'
+  | 'DEPARTMENT_INFO'
+  | 'DEPARTMENT_COMPARE'
+  | 'HOD_INFO'
+  | 'ADMISSIONS_GOTO'
+  | 'PLACEMENTS_GOTO'
+  | 'PRINCIPAL_INFO'
+  | 'TRUSTEES_INFO'
+  | 'COLLEGE_OVERVIEW'
+  | 'FEES_QUERY'
+  | 'CUTOFF_QUERY'
+  | 'DOCUMENTS_QUERY'
+  | 'UNKNOWN';
 
 /**
- * Detects abstract user intents (deterministic UI triggers)
+ * Detects abstract user intents (deterministic UI triggers).
+ * Runs on NORMALIZED ENGLISH text only.
  */
 function detectIntent(normalized: string, entityCount: number): InternalIntent {
-  let isDocumentsTriggered = false;
-  for (const phrase of INTENT_MAP.documents) {
-    if (normalized.includes(phrase.toLowerCase())) {
-      isDocumentsTriggered = true;
-      break;
-    }
-  }
-  let isFeesTriggered = false;
-  for (const phrase of INTENT_MAP.fees) {
-    if (normalized.includes(phrase.toLowerCase())) {
-      isFeesTriggered = true;
-      break;
-    }
-  }
+  // ── Check all intent categories ──────────────────────────────────────────
+  const check = (phrases: string[]) => phrases.some(p => normalized.includes(p));
 
-  let isCourseListTriggered = false;
-  for (const phrase of INTENT_MAP.course_menu) {
-    if (normalized.includes(phrase.toLowerCase())) {
-      isCourseListTriggered = true;
-      break;
-    }
-  }
-  const hasDepartmentListCue =
-    (normalized.includes('department') || normalized.includes('departments')) &&
-    (
-      normalized.includes('which') ||
-      normalized.includes('what') ||
-      normalized.includes('list') ||
-      normalized.includes('available') ||
-      normalized.includes('in college')
-    );
-  if (hasDepartmentListCue) {
-    isCourseListTriggered = true;
-  }
+  const isDocumentsTriggered = check(INTENT_MAP.documents);
+  const isFeesTriggered = check(INTENT_MAP.fees);
+  const isCourseListTriggered = check(INTENT_MAP.course_menu);
+  const isHodTriggered = check(INTENT_MAP.hod);
+  const isAdmissionsTriggered = check(INTENT_MAP.admissions);
+  const isPlacementsTriggered = check(INTENT_MAP.placements);
+  const isPrincipalTriggered = check(INTENT_MAP.principal);
+  const isTrusteesTriggered = check(INTENT_MAP.trustees);
+  const isCollegeOverviewTriggered = check(INTENT_MAP.college_overview);
+  const isCutoffTriggered = check(INTENT_MAP.cutoff);
 
-  let isHodTriggered = false;
-  for (const phrase of INTENT_MAP.hod) {
-    if (normalized.includes(phrase.toLowerCase())) {
-      isHodTriggered = true;
-      break;
-    }
-  }
+  // ── Priority-based routing (highest → lowest) ───────────────────────────
 
-  let isAdmissionsTriggered = false;
-  for (const phrase of INTENT_MAP.admissions) {
-    if (normalized.includes(phrase.toLowerCase())) {
-        isAdmissionsTriggered = true;
-      break;
-    }
-  }
-
-  let isPlacementsTriggered = false;
-  for (const phrase of INTENT_MAP.placements) {
-    if (normalized.includes(phrase.toLowerCase())) {
-        isPlacementsTriggered = true;
-      break;
-    }
-  }
-
-  // RULE 4 - Comparison detected -> Transition to TEXT-ONLY
+  // Comparison detected -> TEXT-ONLY, no card
   if (entityCount > 1 || normalized.includes('compare') || normalized.includes('difference') || normalized.includes(' vs ')) {
     return 'DEPARTMENT_COMPARE';
   }
 
-  // HOD Intent decided by entity presence and core keyword
-  if (isHodTriggered && entityCount === 1) {
-    return 'HOD_INFO';
-  }
+  // Documents
+  if (isDocumentsTriggered) return 'DOCUMENTS_QUERY';
 
-  // Specific high-priority routing intents
-  if (isDocumentsTriggered) return 'UNKNOWN';
-  if (isFeesTriggered && entityCount >= 1) return 'DEPARTMENT_INFO';
+  // Principal has highest priority (specific person query)
+  if (isPrincipalTriggered) return 'PRINCIPAL_INFO';
+
+  // Trustees query
+  if (isTrusteesTriggered) return 'TRUSTEES_INFO';
+
+  // Cutoff: route to admissions flow (text-based answer)
+  if (isCutoffTriggered) return 'CUTOFF_QUERY';
+
+  // HOD + specific department
+  if (isHodTriggered && entityCount === 1) return 'HOD_INFO';
+
+  // Fees + department entity
+  if (isFeesTriggered && entityCount >= 1) return 'FEES_QUERY';
+
+  // Fees without department (general fee query)
+  if (isFeesTriggered && entityCount === 0) return 'FEES_QUERY';
+
+  // Admissions
   if (isAdmissionsTriggered) return 'ADMISSIONS_GOTO';
+
+  // Placements
   if (isPlacementsTriggered) return 'PLACEMENTS_GOTO';
 
-  // Intent decided by entity presence or core keyword
+  // Department entity present (department overview)
   if (entityCount === 1) return 'DEPARTMENT_INFO';
+
+  // College overview
+  if (isCollegeOverviewTriggered) return 'COLLEGE_OVERVIEW';
+
+  // Course menu
   if (isCourseListTriggered) return 'COURSE_LIST';
 
   return 'UNKNOWN';
 }
 
 /**
- * Detects specific department entities across multiple languages.
+ * Detects specific department entities from normalized English text.
  * Applies priority overrides so specialized departments beat generic ones.
  */
 function detectEntities(normalized: string): string[] {
   const matched: string[] = [];
   for (const [deptLabel, keywords] of Object.entries(DEPT_MAP)) {
     for (const phrase of keywords) {
-      if (normalized.includes(phrase.toLowerCase())) {
+      if (normalized.includes(phrase)) {
         matched.push(deptLabel);
-        break; 
+        break;
       }
     }
   }
 
-  // Apply priority overrides: remove generic departments if specific ones are present.
-  // E.g., if both AIML and CSE matched, remove CSE because AIML is the correct target.
+  // Apply priority overrides.
   const toRemove = new Set<string>();
   for (const [specific, generics] of Object.entries(PRIORITY_OVERRIDES)) {
     if (matched.includes(specific)) {
@@ -300,63 +564,120 @@ function detectEntities(normalized: string): string[] {
   return matched.filter(d => !toRemove.has(d));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN EXPORT — normalizeIntent()
+// Enforces the strict pipeline: Detect → Normalize → Match → Log → Return
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Sweeps a raw string transcript against the multilingual dictionary using Intent + Entity architecture.
+ * Sweeps a raw string transcript against the multilingual dictionary
+ * using Intent + Entity architecture.
+ *
+ * Pipeline: Language Detection → Normalization to English → Intent Match → Debug Log
  */
 export function normalizeIntent(input: string): NormalizedIntent {
-  // 0. Language Normalization Layer
+  // ── STEP 1: Language Detection ─────────────────────────────────────────
+  const detectedLanguage = detectLanguage(input);
+
+  // ── STEP 2: Normalization to English ───────────────────────────────────
   const normalized = normalizeToEnglish(input);
 
-  if (INTENT_MAP.documents.some((phrase) => normalized.includes(phrase.toLowerCase()))) {
-    return { trigger: 'documents' };
-  }
-  const hasFeeKeyword = INTENT_MAP.fees.some((phrase) => normalized.includes(phrase.toLowerCase()));
-
-  // 1. Entity Extraction
+  // ── STEP 3: Entity & Intent Extraction (on normalized English ONLY) ────
   const entities = detectEntities(normalized);
-
-  // 2. Intent Classification
+  const hasFeeKeyword = INTENT_MAP.fees.some(p => normalized.includes(p));
   const intent = detectIntent(normalized, entities.length);
 
-  // 3. Response Decision Matrix
+  // ── STEP 4: Map internal intent → UI trigger ──────────────────────────
+  let result: NormalizedIntent;
 
-  // CASE 4 — COMPARE -> No card
-  if (intent === 'DEPARTMENT_COMPARE') {
-    return { trigger: null };
+  switch (intent) {
+    case 'DOCUMENTS_QUERY':
+      result = { trigger: 'documents' };
+      break;
+
+    case 'DEPARTMENT_COMPARE':
+      result = { trigger: null };
+      break;
+
+    case 'PRINCIPAL_INFO':
+      // Principal is a trustees/leadership card — let backend handle as text
+      result = { trigger: 'trustees' };
+      break;
+
+    case 'TRUSTEES_INFO':
+      result = { trigger: 'trustees' };
+      break;
+
+    case 'HOD_INFO':
+      if (entities.length === 1) {
+        result = { trigger: 'hod_info', departmentLabel: entities[0] };
+      } else {
+        result = { trigger: null }; // No department specified, let backend handle
+      }
+      break;
+
+    case 'FEES_QUERY':
+      if (entities.length >= 1) {
+        result = { trigger: 'fees', departmentLabel: entities[0] };
+      } else {
+        // General fees query without department — still trigger fees intent
+        result = { trigger: 'fees' };
+      }
+      break;
+
+    case 'DEPARTMENT_INFO':
+      if (entities.length === 1) {
+        if (hasFeeKeyword) {
+          result = { trigger: 'fees', departmentLabel: entities[0] };
+        } else {
+          result = { trigger: 'department_overview', departmentLabel: entities[0] };
+        }
+      } else {
+        result = { trigger: null };
+      }
+      break;
+
+    case 'COLLEGE_OVERVIEW':
+      result = { trigger: 'college_overview' };
+      break;
+
+    case 'COURSE_LIST':
+      result = { trigger: 'course_menu' };
+      break;
+
+    case 'ADMISSIONS_GOTO':
+      result = { trigger: 'admissions' };
+      break;
+
+    case 'PLACEMENTS_GOTO':
+      result = { trigger: 'placements' };
+      break;
+
+    case 'CUTOFF_QUERY':
+      // Cutoff is answered by admissions flow
+      result = { trigger: 'admissions' };
+      break;
+
+    default:
+      result = { trigger: null };
+      break;
   }
 
-  // CASE 2.5 — HOD INFO -> Entity-locked Card
-  if (intent === 'HOD_INFO' && entities.length === 1) {
-    return {
-      trigger: 'hod',
-      departmentLabel: entities[0]
-    };
-  }
+  // ── STEP 6: MANDATORY DEBUG LOGGING ──────────────────────────────────────
+  const isFallback = result.trigger === null;
+  console.log(
+    `%c[CLARA_INTENT] ` +
+    `Language: ${detectedLanguage} | ` +
+    `Normalized: "${normalized}" | ` +
+    `Entities: [${entities.join(', ')}] | ` +
+    `Intent: ${intent} | ` +
+    `Trigger: ${result.trigger ?? 'NONE'} | ` +
+    `Dept: ${result.departmentLabel ?? 'NONE'} | ` +
+    `Fallback: ${isFallback}`,
+    isFallback
+      ? 'color: #ff6b6b; font-weight: bold;'
+      : 'color: #51cf66; font-weight: bold;'
+  );
 
-  // CASE 2.7 — DEPARTMENT OVERVIEW -> Carousel
-  if (intent === 'DEPARTMENT_INFO' && entities.length === 1) {
-    if (hasFeeKeyword) {
-      return {
-        trigger: 'department_fees',
-        departmentLabel: entities[0]
-      };
-    }
-    return {
-        trigger: 'department_overview',
-        departmentLabel: entities[0]
-    };
-  }
-
-  // CASE 3 — COURSE LIST -> Course Grid
-  if (intent === 'COURSE_LIST') {
-    return {
-      trigger: 'course_menu'
-    };
-  }
-
-  // CASE 5 — ADMISSIONS/PLACEMENTS
-  if (intent === 'ADMISSIONS_GOTO') return { trigger: 'admissions' };
-  if (intent === 'PLACEMENTS_GOTO') return { trigger: 'placements' };
-
-  return { trigger: null };
+  return result;
 }

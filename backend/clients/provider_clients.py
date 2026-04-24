@@ -6,6 +6,7 @@ import asyncio
 import base64
 import io
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -37,6 +38,7 @@ _SARVAM_BASE = "https://api.sarvam.ai"
 _http_client: httpx.AsyncClient | None = None
 _groq_client: Any = None
 _lock = asyncio.Lock()
+_provider_open_until: dict[str, float] = {}
 
 
 def _http_timeout() -> httpx.Timeout:
@@ -135,11 +137,14 @@ async def sarvam_tts_to_base64(text: str, target_language_code: str) -> str | No
         f"{_SARVAM_BASE}/speech/text-to-speech",
     )
 
+    if _provider_open_until.get("sarvam_tts", 0.0) > time.time():
+        return None
     for endpoint in endpoint_candidates:
-        for _ in range(max(1, HTTP_RETRY_ATTEMPTS + 1)):
+        for attempt in range(max(1, HTTP_RETRY_ATTEMPTS + 1)):
             try:
                 resp = await client.post(endpoint, json=payload, headers=headers)
                 if resp.status_code >= 500:
+                    await asyncio.sleep(min(0.6, 0.15 * (2**attempt)))
                     continue
                 if resp.is_success:
                     body = resp.json()
@@ -147,7 +152,9 @@ async def sarvam_tts_to_base64(text: str, target_language_code: str) -> str | No
                     if audio:
                         return audio
             except Exception:
+                await asyncio.sleep(min(0.6, 0.15 * (2**attempt)))
                 continue
+    _provider_open_until["sarvam_tts"] = time.time() + 6.0
 
     # SDK fallback for compatibility with existing deployments.
     try:
@@ -208,12 +215,15 @@ async def sarvam_stt_from_wav(
         f"{_SARVAM_BASE}/speech/speech-to-text",
     )
 
+    if _provider_open_until.get("sarvam_stt", 0.0) > time.time():
+        return None, {}
     for endpoint in endpoint_candidates:
-        for _ in range(max(1, HTTP_RETRY_ATTEMPTS + 1)):
+        for attempt in range(max(1, HTTP_RETRY_ATTEMPTS + 1)):
             try:
                 files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
                 resp = await client.post(endpoint, data=data, files=files, headers=headers)
                 if resp.status_code >= 500:
+                    await asyncio.sleep(min(0.6, 0.15 * (2**attempt)))
                     continue
                 if resp.is_success:
                     body = resp.json()
@@ -234,7 +244,9 @@ async def sarvam_stt_from_wav(
                         }
                         return (text or None), meta
             except Exception:
+                await asyncio.sleep(min(0.6, 0.15 * (2**attempt)))
                 continue
+    _provider_open_until["sarvam_stt"] = time.time() + 6.0
 
     # SDK fallback
     try:

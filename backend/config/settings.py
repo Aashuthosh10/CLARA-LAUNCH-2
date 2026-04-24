@@ -110,6 +110,8 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "6969"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5176")
 KIOSK_TIMEZONE = os.getenv("KIOSK_TIMEZONE", "Asia/Kolkata").strip() or "Asia/Kolkata"
+ENVIRONMENT = os.getenv("ENVIRONMENT", "dev").strip().lower() or "dev"
+PROD_MODE = ENVIRONMENT in {"prod", "production"}
 
 # Performance/latency tuning
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "100"))
@@ -135,6 +137,21 @@ ENABLE_ONCE_ONLY_TTS_SEGMENTS = os.getenv("ENABLE_ONCE_ONLY_TTS_SEGMENTS", "true
 )
 ENABLE_ACK_EARCON = os.getenv("ENABLE_ACK_EARCON", "true").strip().lower() in ("1", "true", "yes", "on")
 ENABLE_EARLY_PARTIAL_TEXT = os.getenv("ENABLE_EARLY_PARTIAL_TEXT", "true").strip().lower() in ("1", "true", "yes", "on")
+MAX_WS_MESSAGE_BYTES = int(os.getenv("MAX_WS_MESSAGE_BYTES", "32768"))
+WS_RATE_LIMIT_WINDOW_S = float(os.getenv("WS_RATE_LIMIT_WINDOW_S", "5.0"))
+WS_RATE_LIMIT_MAX_MESSAGES = int(os.getenv("WS_RATE_LIMIT_MAX_MESSAGES", "30"))
+WS_AUTH_TOKEN = os.getenv("WS_AUTH_TOKEN", "").strip()
+WS_ALLOWED_ORIGINS = tuple(
+    part.strip()
+    for part in os.getenv(
+        "WS_ALLOWED_ORIGINS",
+        "http://localhost:5176,http://127.0.0.1:5176,http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if part.strip()
+)
+REQUIRE_WS_AUTH_IN_PROD = os.getenv("REQUIRE_WS_AUTH_IN_PROD", "true").strip().lower() in ("1", "true", "yes", "on")
+SECURITY_HEADERS_ENABLED = os.getenv("SECURITY_HEADERS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+RAG_CONFIDENCE_THRESHOLD = float(os.getenv("RAG_CONFIDENCE_THRESHOLD", "0.22"))
 
 # Shared HTTP client configuration
 HTTP_TIMEOUT_CONNECT_S = float(os.getenv("HTTP_TIMEOUT_CONNECT_S", "2.0"))

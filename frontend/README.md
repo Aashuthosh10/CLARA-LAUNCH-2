@@ -1,23 +1,20 @@
-# CLARA Frontend
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
 
-React/Vite kiosk UI for CLARA.
+# Run and deploy your AI Studio app
 
-## Run
+This contains everything you need to run your app locally.
 
-```bash
-npm install
-npm run dev
-```
+View your app in AI Studio: https://ai.studio/apps/d2a5b7e7-c094-4b84-bb4d-a260b665b483
 
-The dev server runs on `http://localhost:5176`.
+## Run Locally
 
-## Environment
+**Prerequisites:**  Node.js
 
-Create `frontend/.env.local` only when overriding defaults:
 
-```bash
-VITE_WS_URL=ws://localhost:6969/ws/clara
-VITE_VOICE_INPUT_MODE=browser
-```
-
-`VITE_VOICE_INPUT_MODE=backend` switches mic capture to the backend audio path.
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`

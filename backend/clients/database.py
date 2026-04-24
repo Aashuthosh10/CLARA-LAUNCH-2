@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from typing import Any, List, Optional
 
 from backend.config.settings import (
@@ -267,3 +268,160 @@ def insert_college_chunk(
     finally:
         if conn:
             put_connection(conn)
+
+
+def init_audit_tables() -> bool:
+    """Create operational audit tables if they don't exist."""
+    if not is_db_available():
+        return False
+    conn = None
+    ddl = """
+    CREATE TABLE IF NOT EXISTS sessions (
+        session_id TEXT PRIMARY KEY,
+        device_id TEXT,
+        language TEXT,
+        started_at TIMESTAMP DEFAULT NOW(),
+        ended_at TIMESTAMP NULL,
+        metadata JSONB DEFAULT '{}'::jsonb
+    );
+    CREATE TABLE IF NOT EXISTS turns (
+        turn_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_text TEXT,
+        assistant_text TEXT,
+        timings_json JSONB DEFAULT '{}'::jsonb,
+        providers_json JSONB DEFAULT '{}'::jsonb,
+        rag_sources JSONB DEFAULT '[]'::jsonb,
+        language TEXT,
+        stt_confidence DOUBLE PRECISION NULL,
+        retrieval_score DOUBLE PRECISION NULL,
+        used_fallback BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_turns_session_id ON turns(session_id);
+    CREATE TABLE IF NOT EXISTS errors (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        turn_id TEXT,
+        stage TEXT,
+        code TEXT,
+        message TEXT,
+        stacktrace_hash TEXT,
+        details_json JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_errors_session_id ON errors(session_id);
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(ddl)
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning("Audit table init failed: %s", e)
+        return False
+    finally:
+        if conn:
+            put_connection(conn)
+
+
+def start_session(session_id: str, device_id: str | None, language: str | None, metadata: dict[str, Any] | None = None) -> bool:
+    if not is_db_available():
+        return False
+    return run_query(
+        """
+        INSERT INTO sessions(session_id, device_id, language, metadata)
+        VALUES (%s, %s, %s, %s::jsonb)
+        ON CONFLICT (session_id) DO NOTHING
+        """,
+        (session_id, device_id, language, json.dumps(metadata or {}, ensure_ascii=False)),
+        fetch=False,
+    ) is None
+
+
+def end_session(session_id: str) -> bool:
+    if not is_db_available():
+        return False
+    return run_query(
+        "UPDATE sessions SET ended_at = NOW() WHERE session_id = %s",
+        (session_id,),
+        fetch=False,
+    ) is None
+
+
+def insert_turn(
+    turn_id: str,
+    session_id: str,
+    *,
+    user_text: str | None,
+    assistant_text: str | None,
+    timings_json: dict[str, Any] | None,
+    providers_json: dict[str, Any] | None,
+    rag_sources: list[dict[str, Any]] | None,
+    language: str | None,
+    stt_confidence: float | None,
+    retrieval_score: float | None,
+    used_fallback: bool,
+) -> bool:
+    if not is_db_available():
+        return False
+    return run_query(
+        """
+        INSERT INTO turns(turn_id, session_id, user_text, assistant_text, timings_json, providers_json, rag_sources,
+                          language, stt_confidence, retrieval_score, used_fallback)
+        VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
+        """,
+        (
+            turn_id,
+            session_id,
+            user_text,
+            assistant_text,
+            json.dumps(timings_json or {}, ensure_ascii=False),
+            json.dumps(providers_json or {}, ensure_ascii=False),
+            json.dumps(rag_sources or [], ensure_ascii=False),
+            language,
+            stt_confidence,
+            retrieval_score,
+            used_fallback,
+        ),
+        fetch=False,
+    ) is None
+
+
+def insert_error(
+    *,
+    session_id: str | None,
+    turn_id: str | None,
+    stage: str,
+    code: str,
+    message: str,
+    stacktrace_hash: str | None,
+    details_json: dict[str, Any] | None,
+) -> bool:
+    if not is_db_available():
+        return False
+    error_id = uuid.uuid4().hex
+    return run_query(
+        """
+        INSERT INTO errors(id, session_id, turn_id, stage, code, message, stacktrace_hash, details_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """,
+        (
+            error_id,
+            session_id,
+            turn_id,
+            stage,
+            code,
+            message[:2000],
+            stacktrace_hash,
+            json.dumps(details_json or {}, ensure_ascii=False),
+        ),
+        fetch=False,
+    ) is None

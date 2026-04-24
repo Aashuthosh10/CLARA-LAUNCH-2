@@ -90,4 +90,4 @@ export function isTextMessage(m: ChatMessage): m is TextMessage {
 }
 
 /** Orb state: automatically manages UI feedback during conversations */
-export type OrbState = 'idle' | 'ready' | 'listening' | 'processing' | 'speaking';
+export type OrbState = 'idle' | 'ready' | 'listening' | 'processing' | 'speaking' | 'completed';

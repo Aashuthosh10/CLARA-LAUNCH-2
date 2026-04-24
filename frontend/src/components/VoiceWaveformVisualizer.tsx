@@ -51,7 +51,7 @@ export default function VoiceWaveformVisualizer({
     const obj = intensityObj.current;
     if (state === 'listening') {
       anime.animate(obj, { value: 1, duration: 500, ease: 'easeOutElastic(1, 0.4)' });
-    } else if (state === 'idle') {
+    } else if (state === 'idle' || state === 'off' || state === 'completed') {
       anime.animate(obj, { value: 0.15, duration: 600, ease: 'easeOutQuad' });
     } else if (state === 'speaking') {
       anime.animate(obj, { value: 0.65, duration: 300, ease: 'easeOutQuad' });

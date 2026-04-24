@@ -1,0 +1,270 @@
+{
+  "main": {
+    "id": "5c2099661c611139",
+    "type": "split",
+    "children": [
+      {
+        "id": "dad57aed00074b66",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "35f821b600c676e9",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "CLARA-OS/00_Dashboard/Project Overview.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Project Overview"
+            },
+            "group": "f77dbc726546b90c"
+          }
+        ]
+      },
+      {
+        "id": "6c6925e3d13205d1",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "deba2a7d71530477",
+            "type": "leaf",
+            "state": {
+              "type": "localgraph",
+              "state": {
+                "file": "CLARA-OS/00_Dashboard/Project Overview.md",
+                "options": {
+                  "collapse-filter": true,
+                  "search": "",
+                  "localJumps": 1,
+                  "localBacklinks": true,
+                  "localForelinks": true,
+                  "localInterlinks": false,
+                  "showTags": false,
+                  "showAttachments": false,
+                  "hideUnresolved": false,
+                  "collapse-color-groups": true,
+                  "colorGroups": [],
+                  "collapse-display": true,
+                  "showArrow": false,
+                  "textFadeMultiplier": 0,
+                  "nodeSizeMultiplier": 1,
+                  "lineSizeMultiplier": 1,
+                  "collapse-forces": true,
+                  "centerStrength": 0.518713248970312,
+                  "repelStrength": 10,
+                  "linkStrength": 1,
+                  "linkDistance": 250,
+                  "scale": 0.9999999999999964,
+                  "close": false
+                }
+              },
+              "icon": "lucide-git-fork",
+              "title": "Graph of Project Overview"
+            },
+            "group": "f77dbc726546b90c"
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "97f8eed600ffb4cc",
+    "type": "split",
+    "children": [
+      {
+        "id": "88dd4228e4e13fa2",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "60fac74cb886f8a2",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "c9e2fdde36f298e7",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "ecf6061ea5be9247",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "c214d66a8a37e5c3",
+    "type": "split",
+    "children": [
+      {
+        "id": "1d40325d67146fd0",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "52c15dfb142f01ed",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "CLARA-OS/00_Dashboard/Project Overview.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Project Overview"
+            }
+          },
+          {
+            "id": "54441186ba825b12",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "CLARA-OS/00_Dashboard/Project Overview.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Project Overview"
+            }
+          },
+          {
+            "id": "82380adba0c2622e",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "573b642ac8beb98e",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "2eb215022a6732e2",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "CLARA-OS/00_Dashboard/Project Overview.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Project Overview"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "deba2a7d71530477",
+  "lastOpenFiles": [
+    "Person 1 Backend.md",
+    "CLARA-OS/00_Dashboard/Open Blockers.md",
+    "CLARA-OS/00_Dashboard/Current Sprint.md",
+    "CLARA-OS/_templates/Feature Template.md",
+    "CLARA-OS/_templates/Daily Update Template.md",
+    "CLARA-OS/_templates/Daily Note Template.md",
+    "CLARA-OS/_templates/Bug Template.md",
+    "Top 100 Lobby Queries.md",
+    "CLARA-OS/00_Dashboard/Project Overview.md",
+    "CLARA-OS/11_Runbooks/Backend Runbook.md",
+    "CLARA-OS/10_Decisions/Decision Index.md",
+    "CLARA-OS/10_Decisions/DEC-005 RAG Scope.md",
+    "CLARA-OS/10_Decisions/DEC-004 Navigation Strategy.md",
+    "CLARA-OS/10_Decisions/DEC-003 Frontend Priorities.md",
+    "CLARA-OS/10_Decisions/DEC-002 Backend Hardening Complete.md",
+    "CLARA-OS/10_Decisions/DEC-001 Product Direction.md",
+    "CLARA-OS/09_Team/Team Handoffs.md",
+    "CLARA-OS/09_Team/Person 5 Research.md",
+    "CLARA-OS/06_Navigation/rooms.json Spec.md",
+    "CLARA-OS/06_Navigation/Navigation UX.md",
+    "CLARA-OS/06_Navigation/Floorplan Strategy.md",
+    "CLARA-OS/05_RAG_Knowledge/Top 100 Lobby Queries.md",
+    "CLARA-OS/05_RAG_Knowledge/RAG Evaluation Plan.md",
+    "CLARA-OS/05_RAG_Knowledge/Multilingual Style Notes.md",
+    "CLARA-OS/05_RAG_Knowledge/Knowledge Sources Index.md",
+    "CLARA-OS/05_RAG_Knowledge/Department Content Mapping.md",
+    "desktop.ini",
+    "CLARA-OS/_templates",
+    "CLARA-OS/00_Dashboard/Untitled",
+    "CLARA-OS/99_Archive",
+    "CLARA-OS/12_Releases",
+    "CLARA-OS/11_Runbooks",
+    "CLARA-OS/10_Decisions",
+    "CLARA-OS/09_Team",
+    "CLARA-OS/08_Testing_QA",
+    "CLARA-OS/07_Admin_Panel"
+  ]
+}

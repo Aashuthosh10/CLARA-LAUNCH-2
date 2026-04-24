@@ -1,0 +1,5 @@
+{
+  "name": "CLARA - AI Receptionist Kiosk",
+  "description": "A premium, architectural touchscreen kiosk interface for a high-end AI receptionist.",
+  "requestFramePermissions": ["microphone"]
+}

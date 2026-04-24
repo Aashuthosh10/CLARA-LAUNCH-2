@@ -224,6 +224,17 @@ export default function ChatScreen({
       }
       
       const intent = normalizeIntent(msg.text);
+
+      // ── TASK 1: FULL PIPELINE TRACE (MANDATORY) ──────────────────────────
+      console.log(
+        `%c[CLARA_PIPELINE] User Input: "${msg.text}" | ` +
+        `Trigger: ${intent.trigger ?? 'NONE'} | ` +
+        `Department: ${intent.departmentLabel ?? 'NONE'} | ` +
+        `Source: ${source} | ` +
+        `Fallback: ${intent.trigger === null}`,
+        intent.trigger ? 'color: #51cf66; font-weight: bold;' : 'color: #ff6b6b; font-weight: bold;'
+      );
+
       if (intent.trigger) {
         setPendingLocalIntent(intent);
         msg.localIntent = intent;
@@ -248,6 +259,8 @@ export default function ChatScreen({
   const hasStartedRef = useRef(false);
   const prevLayoutModeRef = useRef<'FULL_TEXT' | 'SPLIT_CARDS'>('FULL_TEXT');
   const hasAutoStartedRef = useRef(false);
+  const wasPlayingAudioRef = useRef(false);
+  const isPendingListeningRef = useRef(false);
 
   // Audio Playback Ref
   const playedSegmentKeysRef = useRef<Set<string>>(new Set());
@@ -443,9 +456,7 @@ export default function ChatScreen({
              t.includes('admissions block') || 
              t.includes('एडमिशन ब्लॉक') || 
              t.includes('अडमिशन ब्लॉक') ||
-             t.includes('सबसे सटीक जानकारी') ||
-             t.includes('ವಿಭಾಗ') || 
-             t.includes('प्रवेश');
+             t.includes('सबसे सटीक जानकारी');
     };
     
     // Fall back to client-side interpreted intent if the backend missed it due to NLP multi-lingual blindspots
@@ -552,8 +563,8 @@ export default function ChatScreen({
       return;
     }
 
-    if (cardTrigger === 'admissions') {
-      // Admissions cards are intentionally disabled; keep response in text mode.
+    if (cardTrigger === 'admissions' || cardTrigger === 'college_overview' || cardTrigger === 'trustees') {
+      // These intents are answered by the backend LLM as text; no card UI.
       setCourseMenuOptions([]);
       setIsDepartmentOverviewStage(false);
       setActiveDepartmentId(null);
@@ -905,13 +916,30 @@ export default function ChatScreen({
 
   // Time-based reset UI behavior removed to enforce persistent screen state.
 
-  // Orb State
+  // Orb State — with persistent 'completed' state for post-response guidance
+  // "Tap to Speak" stays visible FOREVER until user taps orb or listening starts.
   useEffect(() => {
-    if (isPlayingBackendAudio) setOrbState('speaking');
-    else if (isProcessing) setOrbState('processing');
-    else if (propIsListening) setOrbState('listening');
-    else if (hasGreeted && !showUnmuteHint) setOrbState('ready');
-    else setOrbState('idle');
+    // Detect speaking → finished transition
+    const wasSpeaking = wasPlayingAudioRef.current;
+    wasPlayingAudioRef.current = isPlayingBackendAudio;
+
+    if (isPlayingBackendAudio) {
+      setOrbState('speaking');
+    } else if (isProcessing) {
+      setOrbState('processing');
+    } else if (propIsListening || isPendingListeningRef.current) {
+      // User started speaking or explicitly tapped the orb (optimistic listening)
+      setOrbState('listening');
+    } else if (wasSpeaking && !isPlayingBackendAudio) {
+      // CLARA just finished speaking → show 'completed' with "Tap to Speak"
+      // This state persists indefinitely — NO auto-timeout.
+      // Only cleared when: user taps orb OR listening begins.
+      setOrbState('completed');
+    } else if (orbState !== 'completed') {
+      // Normal idle/ready — never override a persistent completed state
+      if (hasGreeted && !showUnmuteHint) setOrbState('ready');
+      else setOrbState('idle');
+    }
   }, [propIsListening, isProcessing, isPlayingBackendAudio, hasGreeted, showUnmuteHint]);
 
   // Auto-Start Listening Loop (ONLY ONCE)
@@ -932,11 +960,32 @@ export default function ChatScreen({
     }
   }, [sendMessage]);
 
+  // Clear optimistic listening state once real listening engages
+  useEffect(() => {
+    if (propIsListening) {
+      isPendingListeningRef.current = false;
+    }
+  }, [propIsListening]);
+
   const handleOrbTap = () => {
     setShowUnmuteHint(false);
     setHasGreeted(true);
     setVisuallyFocusedMessage(null);
-    if (orbState === 'idle' || orbState === 'ready') {
+    
+    // IMMEDIATE VISUAL FEEDBACK: Optimistically set listening state
+    // so the UI feels instantly responsive. The effect above will clear
+    // this when real listening engages or we timeout.
+    isPendingListeningRef.current = true;
+    setOrbState('listening');
+    
+    // Safety fallback: if mic fails to engage, drop optimistic state
+    setTimeout(() => {
+      isPendingListeningRef.current = false;
+      // Force a re-render to evaluating state
+      setOrbState(prev => prev === 'listening' && !propIsListening ? 'idle' : prev);
+    }, 3000);
+
+    if (orbState === 'idle' || orbState === 'ready' || orbState === 'completed') {
       if (voiceInputMode === 'backend') onOrbTap();
       else startSpeechRecognition();
     }
@@ -1047,6 +1096,9 @@ export default function ChatScreen({
                     <div className="clara-thinking-title">{thinkingTitle}</div>
                     <div className="clara-thinking-tagline">{thinkingTagline}</div>
                     <div className="clara-thinking-dots" aria-hidden>...</div>
+                    <motion.div layoutId="orb" className="orb-thinking-container">
+                      <VoiceOrb state={orbState} amplitude={voiceAnalyser.amplitude} onTap={handleOrbTap} label="THINKING..." />
+                    </motion.div>
                   </div>
                 ) : (
                   lastAssistantMsg && isTextMessage(lastAssistantMsg) && (
@@ -1061,14 +1113,17 @@ export default function ChatScreen({
                   )
                 )}
               </div>
-              <motion.div layoutId="orb" className="orb-float-bottom relative">
-                {showUnmuteHint && (
-                  <div className="absolute -top-16 left-1/2 -translate-x-1/2 whitespace-nowrap bg-slate-800 text-white px-4 py-2 rounded-full text-xs flex items-center gap-2 shadow-lg">
-                    <Volume2 size={14} /> Tap to Unmute
-                  </div>
-                )}
-                <VoiceOrb state={orbState} amplitude={voiceAnalyser.amplitude} onTap={handleOrbTap} />
-              </motion.div>
+              
+              {!isProcessing && (
+                <motion.div layoutId="orb" className="orb-float-bottom relative">
+                  {showUnmuteHint && (
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 whitespace-nowrap bg-slate-800 text-white px-4 py-2 rounded-full text-xs flex items-center gap-2 shadow-lg">
+                      <Volume2 size={14} /> Tap to Unmute
+                    </div>
+                  )}
+                  <VoiceOrb state={orbState} amplitude={voiceAnalyser.amplitude} onTap={handleOrbTap} />
+                </motion.div>
+              )}
             </motion.div>
 
           /* ─── SPLIT CARDS MODE (college/dept/hod/trustees) ─── */

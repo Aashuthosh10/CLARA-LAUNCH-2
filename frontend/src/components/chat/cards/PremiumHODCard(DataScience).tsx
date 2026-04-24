@@ -16,7 +16,7 @@ export default function PremiumHODCardDataScience() {
       Malayalam: "ഡോ. നാഗശ്രീ എൻ 12 വർഷത്തിലേറെ അധ്യാപനവും ഗവേഷണവും നടത്തിയ വ്യക്തിയാണ്. ബയോമെഡിക്കൽ ഇമേജ് പ്രോസസിംഗിലും ഡീപ് ലേണിംഗിലും പിഎച്ച്ഡി നേടിയിട്ടുണ്ട്.",
       Hindi: "डॉ. नागಶ್ರೀ एन के पास 12 वर्षों से अधिक का शिक्षण और शोध अनुभव है। उन्होंने बायोमेडिकल इमेज प्रोसेसिंग और डीप लर्निंग में पीएचडी पूरी की है।"
     },
-    portrait: "/assets/hod/nagashree.jpg"
+    portrait: "/assets/hod/hod_nagashree.jpg"
   };
 
   // Select localized bio with English fallback

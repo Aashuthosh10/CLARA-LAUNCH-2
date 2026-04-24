@@ -65,6 +65,8 @@ Start the backend:
 python -m backend.main
 ```
 
+Canonical backend run command is `python -m backend.main` (keeps import paths stable).
+
 Start the frontend in another terminal:
 
 ```bash
@@ -107,6 +109,56 @@ WebSocket smoke test:
 
 ```bash
 python -m backend.tools.ws_smoketest
+```
+
+End-to-end smoke bundle:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1
+```
+
+Cross-platform backend smoke:
+
+```bash
+python -m backend.tools.smoke --url ws://127.0.0.1:6969/ws/clara
+```
+
+## How To Verify Backend Hardening
+
+1. Start PostgreSQL:
+
+```bash
+docker compose up -d
+```
+
+2. Apply idempotent schema:
+
+```bash
+docker exec -i clara-postgres psql -U clara_user -d clara_db < scripts/db/init_pgvector.sql
+```
+
+3. Start backend (canonical):
+
+```bash
+python -m backend.main
+```
+
+4. Run one-command backend smoke:
+
+```bash
+python -m backend.tools.smoke --url ws://127.0.0.1:6969/ws/clara
+```
+
+5. Verify persistence tables and recent writes:
+
+```bash
+psql -h 127.0.0.1 -p 5432 -U clara_user -d clara_db -f backend/tools/db_verify.sql
+```
+
+6. Compute latency p50/p95 from persisted timings:
+
+```bash
+psql -h 127.0.0.1 -p 5432 -U clara_user -d clara_db -v LIMIT_TURNS=200 -f backend/tools/latency_p50_p95.sql
 ```
 
 ## Notes
