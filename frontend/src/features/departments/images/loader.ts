@@ -2,7 +2,7 @@ type ImageModule = () => Promise<string>;
 
 // All department images discovered at build time.
 // Runtime usage is restricted to the currently selected department folder.
-const ALL_IMAGE_MODULES = import.meta.glob('../../../assets/*/*.{png,jpg,jpeg,webp}', {
+const ALL_IMAGE_MODULES = import.meta.glob(['../../../assets/*/*.{png,jpg,jpeg,webp}', '!../../../assets/logo/**'], {
   eager: false,
   import: 'default',
 }) as Record<string, ImageModule>;
